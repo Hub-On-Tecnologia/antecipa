@@ -82,7 +82,8 @@ export async function fetchUsers(): Promise<UserData[]> {
       return rows.map((row: any) => {
         const nome = row.nome || row.NOME || row.nome_corretor || '';
         const dataNascimento = row.datanascimento || row.DATANASCIMENTO || row.data_nascimento || row.nascimento || '';
-        const cpf = row.cpf || row.CPF || row.cpf_cnpj || row.documento || '';
+        const cpf = row.cpf || row.CPF || row.cpf_cnpj || row.cpfcnpj || row.documento || '';
+
         const empresa = row.empresa || row.EMPRESA || '';
         const cargo = row.cargo || row.CARGO || row.funcao || '';
         const superintendencia = row.superintendencia || row.SUPERINTENDENCIA || '';
