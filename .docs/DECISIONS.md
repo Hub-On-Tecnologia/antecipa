@@ -6,6 +6,47 @@
 
 ---
 
+## DEC-012 — 2026-07-23 | Conexão DB-API MariaDB via WireGuard para Base de Colaboradores
+
+**Solicitado por:** Pedro (Dono do Projeto)
+**Decidido por:** Pedro + Orquestrador
+
+**Contexto:**
+Por motivos de segurança e topologia de rede na VPS Hostinger, a aplicação não se conecta diretamente na porta do MariaDB (3306). A comunicação ocorre via proxy REST interno (`DB-API`) acessível no IP `http://10.0.3.2:8000` via túnel WireGuard.
+
+**Decisão:**
+1. Criar endpoints no servidor Express (`server.ts`: `/api/db/query`, `/api/db/execute`, `/api/db/health`) protegidos por `x-access-token`.
+2. Encaminhar as requisições do servidor Express para a DB-API utilizando o cabeçalho `X-API-Key` e suporte a parâmetros sanitizados com `%s`.
+3. Migrar a busca e validação de colaboradores no `sheetsService.ts` para consultar a tabela `corpstek_corretores` do MariaDB, mantendo fallback gracioso para o Google Sheets em caso de indisponibilidade local ou de rede.
+4. Ajustar `normalizeDate` no `utils.ts` para converter datas ISO (`YYYY-MM-DD`) do MariaDB para conciliação automática com o formulário de login (`DD/MM/YYYY`).
+
+**Impacto:**
+- Base de colaboradores migrada para o banco de dados relacional oficial.
+- Credencial `DB_API_KEY` isolada com segurança no servidor Express da VPS Hostinger.
+- Resiliência garantida com fallback automático.
+
+---
+
+## DEC-011 — 2026-07-23 | Sistema de Tokens Descartáveis de 1 Minuto no Firestore
+
+
+**Solicitado por:** Pedro (Dono do Projeto)
+**Decidido por:** Pedro + Orquestrador
+
+**Contexto:**
+Necessidade de disponibilizar links de acesso temporário e seguro ao portal (ex: via CRM/Bitrix) sem expor tokens permanentes ou credenciais fixas na URL.
+
+**Decisão:**
+1. Criar e validar tokens de uso único no Firestore através da coleção `access_tokens`.
+2. Definir tempo de expiração curto de 1 minuto para os tokens gerados para validação de acesso ao portal via link temporário.
+3. Consumir e invalidar o token no Firestore imediatamente no primeiro acesso para impedir reutilização.
+
+**Impacto:**
+- Acesso simplificado e seguro via links diretos temporários sem comprometer o portão de autenticação.
+- Mitigação de riscos de vazamento ou compartilhamento indevido de links de acesso.
+
+---
+
 ## DEC-010 — 2026-07-23 | Blindagem de Segurança e Isolamento de Webhooks no Servidor
 
 **Solicitado por:** Pedro (Dono do Projeto)

@@ -30,8 +30,8 @@ solicitarem **antecipação de comissões** (recebíveis).
 | Banco de Estado | Firebase Firestore |
 | Autenticação | Firebase Auth (Google) + validação via Sheets |
 | Fonte de Dados | Google Sheets (API gviz/tq — read-only) |
-| CRM | Bitrix24 (webhooks REST) |
-| Deploy | Vercel (vercel.json presente) |
+| CRM | Bitrix24 (webhooks REST via Express proxy) |
+| Deploy | VPS Hostinger (`antcp-hubon` via PM2 / Nginx na porta 3001) |
 
 ---
 
@@ -127,9 +127,9 @@ src/
 | `VITE_FIREBASE_STORAGE_BUCKET` | Firebase Storage |
 | `VITE_FIREBASE_MESSAGING_SENDER_ID` | Firebase |
 | `VITE_FIREBASE_APP_ID` | Firebase |
-| `VITE_BITRIX_WEBHOOK_URL` | Criação de deals |
-| `VITE_BITRIX_WEBHOOK_WRITE_URL` | Escrita alternativa |
-| `VITE_BITRIX_LIST_URL` | Listagem de deals |
+| `BITRIX_WEBHOOK_URL` | Servidor Express — Criação de deals |
+| `BITRIX_WEBHOOK_WRITE_URL` | Servidor Express — Escrita alternativa |
+| `BITRIX_LIST_URL` | Servidor Express — Listagem de deals |
 | `VITE_SHEET_ID` | ID da planilha Google |
 | `VITE_SHEET_TAB_USUARIOS` | Nome da guia de usuários |
 | `VITE_SHEET_TAB_CR` | Nome da guia de recebíveis |

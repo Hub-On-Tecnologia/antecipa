@@ -6,7 +6,31 @@
 
 ---
 
+## [2026-07-23] — Migração da Base de Colaboradores para MariaDB (DB-API Proxy via WireGuard)
+
+**Tipo:** Feature / Security / Config
+**Arquivos:**
+- `.env` e `.env.example` (adição de `DB_API_URL` e `DB_API_KEY`)
+- `server.ts` (criação de endpoints `/api/db/query`, `/api/db/execute` e `/api/db/health` com repasse de cabeçalho `X-API-Key`)
+- `src/services/sheetsService.ts` (integração de `fetchUsers` com MariaDB `corpstek_corretores` + fallback Google Sheets)
+- `src/lib/utils.ts` (ajuste do `normalizeDate` para suporte nativo a datas ISO `YYYY-MM-DD` do MariaDB)
+- `.docs/DECISIONS.md` (registro da DEC-012)
+- `.docs/CHANGELOG.md` (este log)
+
+**Por quê:**
+Substituir a consulta estática no Google Sheets por uma base relacional ativa (MariaDB) mantida no servidor via proxy seguro DB-API em rede privada (WireGuard).
+
+**Impacto:**
+- Autenticação e busca de colaboradores agora consultam o MariaDB oficial.
+- Credencial de banco `DB_API_KEY` isolada no servidor sem exposição ao frontend.
+- Tratamento resiliente com fallback automático em caso de falha de conexão.
+
+**Decisões tomadas:** DEC-012 (ver DECISIONS.md)
+
+---
+
 ## [2026-07-23] — Blindagem de Segurança e Isolamento de Webhooks do Bitrix no Servidor
+
 
 **Tipo:** Security / Fix / Config
 **Arquivos:**

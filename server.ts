@@ -35,6 +35,112 @@ app.use("/api/bitrix", (req, res, next) => {
   next();
 });
 
+// Security Middleware for DB-API proxy endpoints
+app.use("/api/db", (req, res, next) => {
+  if (req.path === "/health") {
+    return next();
+  }
+
+  const token = req.headers["x-access-token"] || req.headers["authorization"];
+  const expectedToken = process.env.ACCESS_TOKEN || process.env.VITE_ACCESS_TOKEN;
+
+  if (expectedToken && token !== expectedToken && token !== `Bearer ${expectedToken}`) {
+    return res.status(401).json({ error: "Acesso não autorizado ao proxy de banco de dados (DB-API)." });
+  }
+
+  next();
+});
+
+// DB-API Proxy Endpoints (MariaDB via WireGuard)
+app.get("/api/db/health", async (req, res) => {
+  const dbApiUrl = process.env.DB_API_URL || "http://10.0.3.2:8000";
+  try {
+    const response = await fetch(`${dbApiUrl}/health`, {
+      method: "GET",
+      signal: AbortSignal.timeout(5000),
+    });
+    const data = await response.json();
+    res.json(data);
+  } catch (error: any) {
+    res.status(500).json({ ok: false, error: error.message || "DB-API healthcheck falhou." });
+  }
+});
+
+app.post("/api/db/query", async (req, res) => {
+  const dbApiUrl = process.env.DB_API_URL || "http://10.0.3.2:8000";
+  const dbApiKey = process.env.DB_API_KEY;
+
+  if (!dbApiUrl || !dbApiKey) {
+    return res.status(500).json({ error: "Configuração de DB_API_URL ou DB_API_KEY ausente no servidor." });
+  }
+
+  const { sql, params } = req.body;
+  if (!sql) {
+    return res.status(400).json({ error: "Parâmetro 'sql' é obrigatório." });
+  }
+
+  try {
+    const response = await fetch(`${dbApiUrl}/query`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": dbApiKey,
+      },
+      body: JSON.stringify({ sql, params: params || [] }),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return res.status(response.status).json({ ok: false, error: `DB-API Proxy Error: ${errorText}` });
+    }
+
+    const data = await response.json();
+    res.json(data);
+  } catch (error: any) {
+    console.error("DB-API query error:", error);
+    res.status(500).json({ ok: false, error: error.message || "Erro de conexão com a DB-API." });
+  }
+});
+
+app.post("/api/db/execute", async (req, res) => {
+  const dbApiUrl = process.env.DB_API_URL || "http://10.0.3.2:8000";
+  const dbApiKey = process.env.DB_API_KEY;
+
+  if (!dbApiUrl || !dbApiKey) {
+    return res.status(500).json({ error: "Configuração de DB_API_URL ou DB_API_KEY ausente no servidor." });
+  }
+
+  const { sql, params } = req.body;
+  if (!sql) {
+    return res.status(400).json({ error: "Parâmetro 'sql' é obrigatório." });
+  }
+
+  try {
+    const response = await fetch(`${dbApiUrl}/execute`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": dbApiKey,
+      },
+      body: JSON.stringify({ sql, params: params || [] }),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return res.status(response.status).json({ ok: false, error: `DB-API Proxy Error: ${errorText}` });
+    }
+
+    const data = await response.json();
+    res.json(data);
+  } catch (error: any) {
+    console.error("DB-API execute error:", error);
+    res.status(500).json({ ok: false, error: error.message || "Erro de execução na DB-API." });
+  }
+});
+
+
 // Secure Debug Route to verify environment variables (dev only)
 app.get("/api/bitrix/debug", (req, res) => {
   const listUrl = process.env.BITRIX_LIST_URL || process.env.VITE_BITRIX_LIST_URL || "";
