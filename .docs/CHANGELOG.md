@@ -6,6 +6,22 @@
 
 ---
 
+## [2026-07-23] — Primeiro Commit e Push para Repositório Remoto GitHub
+
+**Tipo:** Config / Infra
+**Arquivos:**
+- Estrutura completa do projeto e repositório local
+- `.gitignore` (exclusão de segredos e artefatos de build)
+**Por quê:**
+Centralizar a hospedagem do código-fonte do Antecipa Portal no repositório oficial da organização Hub ON Tecnologia no GitHub, garantindo versionamento, auditoria e backup seguro do projeto.
+**Impacto:**
+- Projeto totalmente versionado no GitHub (`https://github.com/Hub-On-Tecnologia/antecipa.git`)
+- Branch `main` estabelecida como branch principal
+- Histórico de commits iniciado com autoria de Raphael Damasceno (`raphaelferreira@hubnogueira.com.br`)
+**Decisões tomadas:** DEC-008 (ver DECISIONS.md)
+
+---
+
 ## [2026-07-23] — Setup da Estrutura de Documentação e Agentes de IA
 
 **Tipo:** Infra / Documentação

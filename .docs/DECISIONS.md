@@ -6,6 +6,28 @@
 
 ---
 
+## DEC-008 — 2026-07-23 | Vinculação e Push do Repositório Remoto GitHub
+
+**Solicitado por:** Pedro (Dono do Projeto)
+**Decidido por:** Pedro + Raphael Damasceno
+
+**Contexto:**
+Necessidade de versionar o Antecipa Portal em um repositório remoto oficial da Hub ON Tecnologia para colaboração, backup e rastreabilidade do código-fonte.
+
+**Decisão:**
+Vincular o repositório local ao repositório remoto no GitHub:
+- **URL Remota:** `https://github.com/Hub-On-Tecnologia/antecipa.git`
+- **Autor dos Commits/Push:** Raphael Damasceno (`raphaelferreira@hubnogueira.com.br`)
+- **Branch Principal:** `main`
+- **Estratégia de Merge Inicial:** Conciliação (merge) entre a estrutura local inicial e os arquivos padrão do repositório (`Initial commit`).
+
+**Impacto:**
+- Código fonte versionado e acessível remotamente no GitHub da empresa
+- Histórico de alterações preservado a partir do commit inicial
+- Base pronta para fluxos de CI/CD e revisão de código por PR (Pull Requests)
+
+---
+
 ## DEC-007 — 2026-07-23 | Estrutura de Agentes de IA
 
 **Solicitado por:** Pedro (Dono do Projeto)
