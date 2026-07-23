@@ -1,0 +1,91 @@
+{
+  "entities": {
+    "PromisedCommission": {
+      "title": "Promised Commission",
+      "description": "Represents a commission installment that has been promised/advanced and should be subtracted from the available balance.",
+      "type": "object",
+      "properties": {
+        "pvId": { "type": "string" },
+        "receivableId": { "type": "string" },
+        "amount": { "type": "number" },
+        "previsaoMes": { "type": "string" },
+        "previsaoAno": { "type": "string" },
+        "userId": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "stageName": { "type": "string" },
+        "signatureData": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "document": { "type": "string" },
+            "address": { "type": "string" },
+            "ip": { "type": "string" },
+            "userAgent": { "type": "string" }
+          }
+        },
+        "signedAt": { "type": "string", "format": "date-time" },
+        "advanceType": { "type": "string", "enum": ["TOTAL", "PARCIAL"] },
+        "advanceAmount": { "type": "number" },
+        "isCollateral": { "type": "boolean" },
+        "collateralFor": { "type": "string", "description": "The receivableId this entry is acting as collateral for" },
+        "requestedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["pvId", "receivableId", "amount", "previsaoMes", "previsaoAno", "userId", "status", "stageName", "requestedAt", "updatedAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "In-app notifications for users regarding status changes.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string", "enum": ["info", "success", "error", "warning"] },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "message", "type", "read", "createdAt"]
+    },
+    "AccessLog": {
+      "title": "Access Log",
+      "description": "Logs when a user consults their commissions.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "userName": { "type": "string" },
+        "action": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "userEmail", "userName", "action", "timestamp"]
+    },
+    "AccessToken": {
+      "title": "Access Token",
+      "description": "Temporary, short-lived tokens for secure initial entry through url redirection.",
+      "type": "object",
+      "properties": {
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["createdAt"]
+    }
+  },
+  "firestore": {
+    "/promised_commissions/{commissionId}": {
+      "schema": "PromisedCommission",
+      "description": "Store all promised commission requests"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "User in-app notifications"
+    },
+    "/access_logs/{logId}": {
+      "schema": "AccessLog",
+      "description": "Audit logs of user access"
+    },
+    "/access_tokens/{tokenId}": {
+      "schema": "AccessToken",
+      "description": "Temporary short-lived redirection access tokens"
+    }
+  }
+}

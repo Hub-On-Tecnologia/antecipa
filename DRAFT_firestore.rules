@@ -1,0 +1,105 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isValidId(id) { 
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+    
+    function isSignedIn() { 
+      return request.auth != null; 
+    }
+    
+    function incoming() { 
+      return request.resource.data; 
+    }
+    
+    function existing() { 
+      return resource.data; 
+    }
+    
+    function isOwner(data) { 
+      return isSignedIn() && data.userId == request.auth.uid; 
+    }
+
+    // --- Validation Blueprints ---
+    function isValidPromisedCommission(data) {
+      let requiredKeys = ['pvId', 'receivableId', 'amount', 'previsaoMes', 'previsaoAno', 'userId', 'status', 'stageName', 'requestedAt', 'updatedAt'];
+      return data.keys().hasAll(requiredKeys) &&
+             data.pvId is string &&
+             data.receivableId is string &&
+             data.amount is number &&
+             data.previsaoMes is string &&
+             data.previsaoAno is string &&
+             data.userId == request.auth.uid &&
+             data.status in ['pending', 'approved', 'rejected'] &&
+             data.stageName is string &&
+             data.requestedAt == request.time &&
+             data.updatedAt == request.time &&
+             (data.keys().hasAny(['isCollateral']) ? (data.isCollateral is bool) : true) &&
+             (data.keys().hasAny(['collateralFor']) ? (data.collateralFor is string) : true) &&
+             (data.keys().hasAny(['userRole']) ? (data.userRole is string) : true);
+    }
+
+    function isValidUpdate(data) {
+      let allowedKeys = ['status', 'stageName', 'updatedAt', 'signatureData', 'signedAt', 'userRole'];
+      let affected = data.diff(existing()).affectedKeys();
+      
+      return affected.hasOnly(allowedKeys) &&
+             (affected.hasAny(['status']) ? (data.status in ['pending', 'approved', 'rejected']) : true) &&
+             (affected.hasAny(['stageName']) ? (data.stageName is string) : true) &&
+             (affected.hasAny(['signatureData']) ? (
+               data.signatureData.name is string &&
+               data.signatureData.document is string &&
+               data.signatureData.address is string &&
+               data.signatureData.ip is string &&
+               data.signatureData.userAgent is string &&
+               data.signedAt == request.time
+             ) : true) &&
+             (affected.hasAny(['userRole']) ? (data.userRole is string) : true) &&
+             data.updatedAt == request.time;
+    }
+
+    // --- Resources ---
+    match /promised_commissions/{commissionId} {
+      // Secure Get: Only owner can read their own records
+      allow get: if isOwner(existing());
+      
+      // Secure List: Query MUST be filtered by userId on the client side
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      // Secure Create: Validate ID and strict schema
+      allow create: if isSignedIn() && 
+                    request.auth.token.email_verified == true &&
+                    isValidId(commissionId) && 
+                    isValidPromisedCommission(request.resource.data);
+      
+      // Allow Status Updates or Full Re-Submission (e.g. from Rejected state)
+      allow update: if isOwner(existing()) && 
+                    request.auth.token.email_verified == true &&
+                    (isValidUpdate(incoming()) || isValidPromisedCommission(incoming()));
+      
+      // Allow delete if owner. Handle non-existent doc case to avoid PERMISSION_DENIED on no-op deletes
+      allow delete: if isSignedIn() && (resource == null || isOwner(resource.data));
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['read']);
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /access_logs/{logId} {
+      allow create: if isSignedIn() && 
+                    incoming().userId == request.auth.uid &&
+                    incoming().userEmail == request.auth.token.email &&
+                    incoming().timestamp == request.time;
+    }
+  }
+}
