@@ -19,82 +19,26 @@ export function isPlaceholderUrl(url: string) {
 }
 
 export async function secureBitrixFetch(endpoint: string, options: RequestInit) {
-  let initialResponse: Response | null = null;
-  let useFallback = false;
-  let reason = "";
+  const token = import.meta.env.VITE_ACCESS_TOKEN || '';
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string> || {}),
+  };
+
+  if (token) {
+    headers['x-access-token'] = token;
+  }
 
   try {
-    initialResponse = await fetch(endpoint, options);
-    if (initialResponse.ok) {
-      return initialResponse;
-    }
-    
-    const contentType = initialResponse.headers.get("content-type") || "";
-    if (initialResponse.status === 404 || initialResponse.status === 405 || contentType.includes("text/html")) {
-      useFallback = true;
-      reason = `Status ${initialResponse.status} do proxy ou tipo de conteúdo HTML recebido (${contentType}).`;
-    }
+    const response = await fetch(endpoint, {
+      ...options,
+      headers
+    });
+    return response;
   } catch (error: any) {
-    useFallback = true;
-    reason = `Erro de rede ao conectar no proxy: ${error?.message || error}`;
+    console.error(`[secureBitrixFetch] Erro na comunicação com o proxy backend (${endpoint}):`, error);
+    throw new Error(`Falha de comunicação com o servidor proxy do Bitrix: ${error?.message || error}. Verifique a conectividade com o servidor.`);
   }
-
-  if (useFallback) {
-    console.warn(`[secureBitrixFetch] ${reason} Acionando fallback direto para o Bitrix24...`);
-    try {
-      const fallbackResponse = await executeDirectFallback(endpoint, options);
-      if (!fallbackResponse.ok) {
-        const text = await fallbackResponse.text();
-        throw new Error(`O webhook direto do Bitrix24 retornou erro status ${fallbackResponse.status}: ${text}`);
-      }
-      return fallbackResponse;
-    } catch (fallbackError: any) {
-      const clientWriteUrl = import.meta.env.VITE_BITRIX_WEBHOOK_WRITE_URL || "";
-      const clientListUrl = import.meta.env.VITE_BITRIX_LIST_URL || "";
-      
-      const isPl = !clientWriteUrl || !clientListUrl || isPlaceholderUrl(clientWriteUrl) || isPlaceholderUrl(clientListUrl);
-      const missingVarsMsg = isPl
-        ? " IMPORTANTE: Suas variáveis de ambiente do Bitrix no navegador estão vazias ou como padrão (placeholder). Você precisa configurar as variáveis de ambiente 'VITE_BITRIX_WEBHOOK_WRITE_URL' e 'VITE_BITRIX_LIST_URL' no painel de configurações do Vercel, salvar e então realizar um NOVO DEPLOY (Rebuild) na Vercel para que o Vite incorpore as variáveis no código estático do cliente."
-        : " IMPORTANTE: Verifique se as URLs configuradas para o Bitrix são válidas, se possuem as permissões corretas (permissão CRM) e se aceitam requisições CORS do domínio do seu Vercel.";
-
-      throw new Error(`Falha no fallback direto do Bitrix24: ${fallbackError.message || fallbackError}.${missingVarsMsg}`);
-    }
-  }
-
-  return initialResponse!;
-}
-
-async function executeDirectFallback(endpoint: string, options: RequestInit) {
-  const writeUrl = import.meta.env.VITE_BITRIX_WEBHOOK_WRITE_URL || "";
-  const listUrl = import.meta.env.VITE_BITRIX_LIST_URL || "";
-  
-  const baseUrl = writeUrl || listUrl;
-  if (!baseUrl || isPlaceholderUrl(baseUrl)) {
-    throw new Error("URLs reais do Bitrix24 não estão definidas nas variáveis de ambiente do cliente (VITE_BITRIX_WEBHOOK_WRITE_URL ou VITE_BITRIX_LIST_URL).");
-  }
-
-  let targetUrl = "";
-  if (endpoint.endsWith("/api/bitrix/add")) {
-    targetUrl = writeUrl ? writeUrl : listUrl.replace("crm.deal.list.json", "crm.deal.add.json");
-  } else if (endpoint.endsWith("/api/bitrix/update")) {
-    targetUrl = writeUrl ? writeUrl.replace("crm.deal.add.json", "crm.deal.update.json") : listUrl.replace("crm.deal.list.json", "crm.deal.update.json");
-  } else if (endpoint.endsWith("/api/bitrix/get")) {
-    targetUrl = writeUrl ? writeUrl.replace("crm.deal.add.json", "crm.deal.get.json") : listUrl.replace("crm.deal.list.json", "crm.deal.get.json");
-  } else if (endpoint.endsWith("/api/bitrix/list")) {
-    targetUrl = listUrl ? listUrl : writeUrl.replace("crm.deal.add.json", "crm.deal.list.json");
-  } else {
-    throw new Error(`Endpoint do proxy desconhecido para fallback direto: ${endpoint}`);
-  }
-
-  console.log(`Fallback direto para o Bitrix: executando fetch direto para ${targetUrl.substring(0, 45)}...`);
-  
-  return await fetch(targetUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: options.body
-  });
 }
 
 export async function getBitrixDeal(dealId: string) {

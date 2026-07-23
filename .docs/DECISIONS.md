@@ -6,6 +6,51 @@
 
 ---
 
+## DEC-010 — 2026-07-23 | Blindagem de Segurança e Isolamento de Webhooks no Servidor
+
+**Solicitado por:** Pedro (Dono do Projeto)
+**Decidido por:** Pedro + Orquestrador
+
+**Contexto:**
+Após auditoria ativa de segurança, identificou-se que as chaves de webhook do Bitrix24 estavam expostas como variáveis `VITE_` no código estático do cliente, e os endpoints do servidor Express `/api/bitrix/*` não possuíam validação de cabeçalho nem restrição de acesso.
+
+**Decisão:**
+1. Isolar os webhooks do Bitrix no servidor Express usando variáveis sem o prefixo `VITE_` (`BITRIX_WEBHOOK_URL`, `BITRIX_LIST_URL`, `BITRIX_WEBHOOK_WRITE_URL`).
+2. Remover o fallback direto do navegador no `bitrixService.ts`, garantindo que os segredos nunca cheguem ao bundle `.js` compilado.
+3. Exigir cabeçalho `x-access-token` nos endpoints `/api/bitrix/*` do `server.ts`.
+4. Desativar a rota `/api/bitrix/debug` em ambiente de produção.
+5. Blindar as regras da coleção `access_tokens` no `firestore.rules` proibindo listagens públicas.
+
+**Impacto:**
+- Segredos do CRM Bitrix24 totalmente protegidos contra inspeção no navegador.
+- API do servidor protegida contra uso não autorizado.
+- Regras do Firestore endurecidas.
+
+---
+
+## DEC-009 — 2026-07-23 | Deploy e Configuração da VPS Hostinger (antcp-hubon)
+
+**Solicitado por:** Pedro (Dono do Projeto)
+**Decidido por:** Pedro + Orquestrador
+
+**Contexto:**
+Necessidade de implantar o sistema Antecipa Portal em ambiente de produção na VPS Hostinger com o nome de serviço `antcp-hubon` e roteamento HTTPS.
+
+**Decisão:**
+1. Renomear a aplicação de produção para `antcp-hubon` (no `package.json` e `ecosystem.config.cjs`).
+2. Configurar o PM2 na VPS (`179.197.64.244`) rodando o servidor Node.js na porta 3001.
+3. Integrar com o proxy reverso Traefik existente na VPS para roteamento com certificado SSL (HTTPS) automático.
+4. Liberar acessos via:
+   - `https://hubon.tech/antecipa` (subpasta ativa)
+   - `https://antecipa.hubon.tech` (subdomínio no Traefik).
+
+**Impacto:**
+- Aplicação no ar em produção rodando 24/7 com reinício automático via PM2.
+- Roteamento seguro via HTTPS ativo.
+
+
+---
+
 ## DEC-008 — 2026-07-23 | Vinculação e Push do Repositório Remoto GitHub
 
 **Solicitado por:** Pedro (Dono do Projeto)

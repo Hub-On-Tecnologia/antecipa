@@ -7,7 +7,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 // Enable JSON bodies with a larger limit for base64 file uploads
 app.use(express.json({ limit: "50mb" }));
@@ -16,7 +16,26 @@ const isPlaceholderUrl = (url: string) => {
   return !url || url.includes("seu-dominio") || url.includes("USER_ID") || url.includes("TOKEN");
 };
 
-// Secure Debug Route to verify environment variables
+// Security Middleware for Bitrix API proxy endpoints
+app.use("/api/bitrix", (req, res, next) => {
+  if (req.path === "/debug") {
+    if (process.env.NODE_ENV === "production") {
+      return res.status(403).json({ error: "Endpoint de debug desativado em ambiente de produção." });
+    }
+    return next();
+  }
+
+  const token = req.headers["x-access-token"] || req.headers["authorization"];
+  const expectedToken = process.env.ACCESS_TOKEN || process.env.VITE_ACCESS_TOKEN;
+
+  if (expectedToken && token !== expectedToken && token !== `Bearer ${expectedToken}`) {
+    return res.status(401).json({ error: "Acesso não autorizado ao proxy de integração Bitrix." });
+  }
+
+  next();
+});
+
+// Secure Debug Route to verify environment variables (dev only)
 app.get("/api/bitrix/debug", (req, res) => {
   const listUrl = process.env.BITRIX_LIST_URL || process.env.VITE_BITRIX_LIST_URL || "";
   const writeUrl = process.env.BITRIX_WEBHOOK_WRITE_URL || process.env.VITE_BITRIX_WEBHOOK_WRITE_URL || "";
@@ -52,7 +71,7 @@ app.post("/api/bitrix/list", async (req, res) => {
 
   if (isPlaceholderUrl(listUrl)) {
     return res.status(400).json({ 
-      error: "Ambiente de Teste: Configure suas variáveis reais do Bitrix24 no AI Studio (Secrets / Env Variables) para habilitar esta integração."
+      error: "Ambiente de Teste: Configure suas variáveis reais do Bitrix24 no servidor para habilitar esta integração."
     });
   }
 
@@ -92,7 +111,7 @@ app.post("/api/bitrix/get", async (req, res) => {
 
   if (isPlaceholderUrl(baseUrl)) {
     return res.status(400).json({ 
-      error: "Ambiente de Teste: Configure suas variáveis reais do Bitrix24 no AI Studio (Secrets / Env Variables) para habilitar esta integração."
+      error: "Ambiente de Teste: Configure suas variáveis reais do Bitrix24 no servidor para habilitar esta integração."
     });
   }
 
@@ -137,7 +156,7 @@ app.post("/api/bitrix/add", async (req, res) => {
 
   if (isPlaceholderUrl(writeUrl)) {
     return res.status(400).json({ 
-      error: "Ambiente de Teste: Configure suas variáveis reais do Bitrix24 no AI Studio (Secrets / Env Variables) para habilitar esta integração."
+      error: "Ambiente de Teste: Configure suas variáveis reais do Bitrix24 no servidor para habilitar esta integração."
     });
   }
 
@@ -174,7 +193,7 @@ app.post("/api/bitrix/update", async (req, res) => {
 
   if (isPlaceholderUrl(writeUrl)) {
     return res.status(400).json({ 
-      error: "Ambiente de Teste: Configure suas variáveis reais do Bitrix24 no AI Studio (Secrets / Env Variables) para habilitar esta integração."
+      error: "Ambiente de Teste: Configure suas variáveis reais do Bitrix24 no servidor para habilitar esta integração."
     });
   }
   const updateUrl = writeUrl.replace('crm.deal.add.json', 'crm.deal.update.json');

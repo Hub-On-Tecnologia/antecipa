@@ -108,7 +108,10 @@ service cloud.firestore {
     }
 
     match /access_tokens/{tokenId} {
-      allow get, create, delete: if tokenId is string && tokenId.size() <= 128;
+      allow get: if tokenId is string && tokenId.size() <= 128;
+      allow list: if false;
+      allow create: if isSignedIn() && tokenId is string && tokenId.size() <= 128;
+      allow delete: if tokenId is string && tokenId.size() <= 128;
     }
   }
 }

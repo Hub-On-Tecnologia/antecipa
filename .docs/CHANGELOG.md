@@ -6,6 +6,44 @@
 
 ---
 
+## [2026-07-23] — Blindagem de Segurança e Isolamento de Webhooks do Bitrix no Servidor
+
+**Tipo:** Security / Fix / Config
+**Arquivos:**
+- `.env` (migração de webhooks Bitrix para variáveis do servidor sem prefixo `VITE_`, remoção de duplicidades)
+- `.env.example` (atualização das orientações de variáveis de ambiente)
+- `server.ts` (middleware de autenticação `x-access-token`, desativação de debug em prod)
+- `src/services/bitrixService.ts` (envio de token de acesso e remoção de fallback direto no navegador)
+- `firestore.rules` (bloqueio de listagens na coleção `access_tokens`)
+**Por quê:**
+Varredura ativa de segurança identificou que os tokens do Bitrix24 estavam expostos no JavaScript compilação Vite e o servidor Express não validava requisições proxy.
+**Impacto:**
+- Segredos do Bitrix24 eliminados do bundle `.js` estático do navegador.
+- Endpoints proxy do Express agora protegidos com verificação de token.
+- Regras do Firestore consolidadas.
+**Decisões tomadas:** DEC-010 (ver DECISIONS.md)
+
+---
+
+## [2026-07-23] — Deploy da Aplicação antcp-hubon na VPS Hostinger
+
+**Tipo:** Config / Infra / Deploy
+**Arquivos:**
+- `server.ts` (suporte a porta configurável `process.env.PORT`)
+- `package.json` (renomeado projeto para `antcp-hubon`)
+- `ecosystem.config.cjs` (criada configuração PM2 na porta 3001)
+- `Dockerfile` / `deploy-vps.sh` (scripts de automação)
+- `/var/www/antcp-hubon` (VPS Hostinger `179.197.64.244`)
+**Por quê:**
+Subir a aplicação Antecipa em ambiente de produção na VPS Hostinger sob o nome `antcp-hubon`.
+**Impacto:**
+- Servidor em produção rodando na porta 3001 gerenciado pelo PM2
+- Traefik roteando com SSL (HTTPS) ativo em `https://hubon.tech/antecipa` e `https://antecipa.hubon.tech`
+**Decisões tomadas:** DEC-009 (ver DECISIONS.md)
+
+---
+
+
 ## [2026-07-23] — Primeiro Commit e Push para Repositório Remoto GitHub
 
 **Tipo:** Config / Infra
