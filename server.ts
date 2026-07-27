@@ -26,9 +26,9 @@ app.use("/api/bitrix", (req, res, next) => {
   }
 
   const token = req.headers["x-access-token"] || req.headers["authorization"];
-  const expectedToken = process.env.ACCESS_TOKEN || process.env.VITE_ACCESS_TOKEN;
+  const expectedToken = process.env.ACCESS_TOKEN;
 
-  if (expectedToken && token !== expectedToken && token !== `Bearer ${expectedToken}`) {
+  if (!expectedToken || (token !== expectedToken && token !== `Bearer ${expectedToken}`)) {
     return res.status(401).json({ error: "Acesso não autorizado ao proxy de integração Bitrix." });
   }
 
@@ -42,9 +42,9 @@ app.use("/api/db", (req, res, next) => {
   }
 
   const token = req.headers["x-access-token"] || req.headers["authorization"];
-  const expectedToken = process.env.ACCESS_TOKEN || process.env.VITE_ACCESS_TOKEN;
+  const expectedToken = process.env.ACCESS_TOKEN;
 
-  if (expectedToken && token !== expectedToken && token !== `Bearer ${expectedToken}`) {
+  if (!expectedToken || (token !== expectedToken && token !== `Bearer ${expectedToken}`)) {
     return res.status(401).json({ error: "Acesso não autorizado ao proxy de banco de dados (DB-API)." });
   }
 
@@ -62,7 +62,8 @@ app.get("/api/db/health", async (req, res) => {
     const data = await response.json();
     res.json(data);
   } catch (error: any) {
-    res.status(500).json({ ok: false, error: error.message || "DB-API healthcheck falhou." });
+    console.error("DB-API healthcheck error:", error);
+    res.status(500).json({ ok: false, error: "DB-API healthcheck indisponível." });
   }
 });
 
@@ -79,6 +80,12 @@ app.post("/api/db/query", async (req, res) => {
     return res.status(400).json({ error: "Parâmetro 'sql' é obrigatório." });
   }
 
+  // Sanitização e Restrição de Segurança: /api/db/query aceita exclusivamente instruções de leitura (SELECT)
+  const normalizedSql = String(sql).trim().toUpperCase();
+  if (!normalizedSql.startsWith("SELECT") && !normalizedSql.startsWith("WITH")) {
+    return res.status(400).json({ error: "Endpoint restrito a consultas de leitura (SELECT)." });
+  }
+
   try {
     const response = await fetch(`${dbApiUrl}/query`, {
       method: "POST",
@@ -92,14 +99,15 @@ app.post("/api/db/query", async (req, res) => {
 
     if (!response.ok) {
       const errorText = await response.text();
-      return res.status(response.status).json({ ok: false, error: `DB-API Proxy Error: ${errorText}` });
+      console.error("DB-API Query Proxy Error:", errorText);
+      return res.status(response.status).json({ ok: false, error: "Falha na consulta ao banco de dados interno." });
     }
 
     const data = await response.json();
     res.json(data);
   } catch (error: any) {
     console.error("DB-API query error:", error);
-    res.status(500).json({ ok: false, error: error.message || "Erro de conexão com a DB-API." });
+    res.status(500).json({ ok: false, error: "Erro de comunicação com o banco de dados." });
   }
 });
 
@@ -129,14 +137,15 @@ app.post("/api/db/execute", async (req, res) => {
 
     if (!response.ok) {
       const errorText = await response.text();
-      return res.status(response.status).json({ ok: false, error: `DB-API Proxy Error: ${errorText}` });
+      console.error("DB-API Execute Proxy Error:", errorText);
+      return res.status(response.status).json({ ok: false, error: "Falha na execução no banco de dados interno." });
     }
 
     const data = await response.json();
     res.json(data);
   } catch (error: any) {
     console.error("DB-API execute error:", error);
-    res.status(500).json({ ok: false, error: error.message || "Erro de execução na DB-API." });
+    res.status(500).json({ ok: false, error: "Erro de comunicação com o banco de dados." });
   }
 });
 

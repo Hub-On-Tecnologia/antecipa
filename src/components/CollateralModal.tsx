@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { X, Shield, CheckCircle2, AlertCircle, Info, DollarSign, Percent, AlertTriangle } from 'lucide-react';
+import { X, Shield, CheckCircle2, AlertCircle, Info, DollarSign, AlertTriangle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Receivable } from '../services/sheetsService';
 
@@ -48,8 +48,7 @@ export default function CollateralModal({
 
   // Filtra candidatos a garantia (outros títulos do usuário com saldo disponível > 0)
   const validCandidates = availableReceivables.filter(r => {
-    return r.receivableId !== primaryReceivable.receivableId && 
-           r.id !== primaryReceivable.id;
+    return r.receivableId !== primaryReceivable.receivableId;
   });
 
   const selectedCollaterals = validCandidates.filter(r => selectedIds.includes(r.receivableId));

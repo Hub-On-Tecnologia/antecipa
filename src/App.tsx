@@ -5,7 +5,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { LogOut, Shield, LogIn, ArrowRight, Sun, Moon, Lock, ShieldAlert, Key, HelpCircle, Sparkles, BookOpen } from 'lucide-react';
+import { LogOut, Shield, LogIn, ArrowRight, Sun, Moon, Lock, ShieldAlert, Key, Sparkles, Loader2, RefreshCw, Terminal } from 'lucide-react';
 import LoginForm from './components/LoginForm';
 import Dashboard from './components/Dashboard';
 import InstitutionalPage from './components/InstitutionalPage';
@@ -15,7 +15,6 @@ import { UserAuth } from './services/bitrixService';
 import { cn } from './lib/utils';
 import { auth, onAuthStateChanged, signInWithGoogle, User, db } from './services/firebaseService';
 import { doc, getDoc, deleteDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { Loader2, RefreshCw, Terminal } from 'lucide-react';
 
 export default function App() {
   const [userAuthData, setUserAuthData] = useState<UserAuth | null>(null);
@@ -160,12 +159,9 @@ export default function App() {
   const handleGenerateAndRedirect = async () => {
     setIsGeneratingToken(true);
     try {
-      // Gera um token aleatório seguro para testes
-      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-      let tokenId = 'token_';
-      for (let i = 0; i < 16; i++) {
-        tokenId += chars.charAt(Math.floor(Math.random() * chars.length));
-      }
+      // Gera um token aleatório criptograficamente seguro para testes
+      const uuid = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : Math.random().toString(36).substring(2, 15);
+      const tokenId = `token_${uuid.slice(0, 16)}`;
 
       // Adiciona o token no Firestore com data atual
       const tokenRef = doc(db, 'access_tokens', tokenId);
@@ -184,11 +180,6 @@ export default function App() {
   };
 
   if (isTutorialMode) {
-    const toggleTheme = () => {
-      const nextTheme = theme === 'dark' ? 'light' : 'dark';
-      setTheme(nextTheme);
-      localStorage.setItem('antecipa_theme', nextTheme);
-    };
     return <TutorialPage theme={theme} toggleTheme={toggleTheme} />;
   }
 

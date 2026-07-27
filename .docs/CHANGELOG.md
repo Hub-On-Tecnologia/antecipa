@@ -6,24 +6,36 @@
 
 ---
 
-## [2026-07-23] — Migração da Base de Colaboradores para MariaDB (DB-API Proxy via WireGuard)
+## [2026-07-23] — Migração da Base de Colaboradores para MariaDB (DB-API Proxy via WireGuard) & Blindagem de Segurança
 
 **Tipo:** Feature / Security / Config
 **Arquivos:**
 - `.env` e `.env.example` (adição de `DB_API_URL` e `DB_API_KEY`)
-- `server.ts` (criação de endpoints `/api/db/query`, `/api/db/execute` e `/api/db/health` com repasse de cabeçalho `X-API-Key`)
-- `src/services/sheetsService.ts` (integração de `fetchUsers` com MariaDB `corpstek_corretores` + fallback Google Sheets)
-- `src/lib/utils.ts` (ajuste do `normalizeDate` para suporte nativo a datas ISO `YYYY-MM-DD` do MariaDB)
-- `.docs/DECISIONS.md` (registro da DEC-012)
+- `server.ts` (criação dos endpoints `/api/db/query`, `/api/db/execute` e `/api/db/health` com repasse de `X-API-Key`, validação de token, restrição estrita de SELECT e sanitização de erros de banco)
+- `src/services/sheetsService.ts` (integração de `fetchUsers` com MariaDB `corpstek_corretores` via `queryDbProxy` com timeout de 5s, fallback gracioso Google Sheets, mapeamento flexível de `cpfcnpj` e filtros SQL)
+- `src/lib/utils.ts` (padronização do `normalizeCPF` com `padStart(11, '0')` e ajuste do `normalizeDate` para datas ISO `YYYY-MM-DD`)
+- `.docs/DECISIONS.md` (registro e extensão da DEC-012)
 - `.docs/CHANGELOG.md` (este log)
 
 **Por quê:**
-Substituir a consulta estática no Google Sheets por uma base relacional ativa (MariaDB) mantida no servidor via proxy seguro DB-API em rede privada (WireGuard).
+Substituir a consulta estática no Google Sheets por uma base relacional ativa (MariaDB) mantida no servidor via proxy seguro DB-API em rede privada (WireGuard), garantindo alta resiliência, sanitização contra vazamento de esquemas do banco e tolerância a falhas.
+
+**Detalhes da Implementação:**
+- **Proxy DB-API & Variáveis de Ambiente:** Endpoints `/api/db/query`, `/api/db/execute` e `/api/db/health` criados no Express para intermediar chamadas utilizando a chave `DB_API_KEY` via cabeçalho `X-API-Key` apontando para `DB_API_URL` (`http://10.0.3.2:8000`).
+- **Restrição Estrita de Leitura (SELECT):** O endpoint `/api/db/query` no `server.ts` valida se a consulta enviada inicia obrigatoriamente com `SELECT` ou `WITH`. Tentativas de mutação (ex: `UPDATE`, `DELETE`) são bloqueadas imediatamente com HTTP 400 Bad Request.
+- **Sanitização Estrita de Erros:** Erros de banco e exceções internas são salvos unicamente no log do servidor Node.js (`console.error`), retornando mensagens genéricas sanitizadas ao navegador (`"Falha na consulta ao banco de dados interno."` ou `"Erro de comunicação com o banco de dados."`), prevenindo exposição de esquemas SQL ou stack traces.
+- **Timeout de Conexão de 5 Segundos:** A função `queryDbProxy()` e a rota `/api/db/health` utilizam `AbortSignal.timeout(5000)` para abortar requisições em até 5s em caso de lentidão da rede.
+- **Filtros SQL de Colaboradores Ativos:** Consulta a `corpstek_corretores` utiliza: `WHERE administrativo_ativo = %s AND (data_exclusao IS NULL OR data_exclusao = %s)` (parâmetros `[1, "1970-01-01 00:00:01"]`).
+- **Mapeamento Resiliente do Campo `cpfcnpj`:** Parser em cascata (`row.cpf || row.CPF || row.cpf_cnpj || row.cpfcnpj || row.documento`) para suportar qualquer variação do nome da coluna no schema do MariaDB.
+- **Padronização de CPF de 11 Dígitos (`padStart`):** `normalizeCPF` extrai caracteres não numéricos e preenche com zeros à esquerda até atingir 11 dígitos (`clean.padStart(11, '0')`), alinhando a conciliação entre formulário e banco.
+- **Mapeamento Flexível dos Demais Campos:** Suporte a variações para Nome (`nome`/`NOME`/`nome_corretor`), Data de Nascimento (`datanascimento`/`data_nascimento`), Cargo (`cargo`/`funcao`), Superintendência e Loja.
+- **Fallback Transparente:** Caso a DB-API/MariaDB apresente falha ou estoure o timeout de 5s, o sistema alterna silenciosamente para a guia `"usuários"` do Google Sheets.
 
 **Impacto:**
-- Autenticação e busca de colaboradores agora consultam o MariaDB oficial.
-- Credencial de banco `DB_API_KEY` isolada no servidor sem exposição ao frontend.
-- Tratamento resiliente com fallback automático em caso de falha de conexão.
+- Autenticação e busca de colaboradores executadas no MariaDB relacional oficial.
+- Segurança reforçada no servidor Express (restrição SELECT, sanitização de exceções e isolamento de `DB_API_KEY`).
+- Mapeamento de CPF/CNPJ resiliente a mudanças no banco de dados com formatação garantida de 11 dígitos.
+- Experiência do usuário protegida contra instabilidades de rede via timeout de 5s e fallback Google Sheets.
 
 **Decisões tomadas:** DEC-012 (ver DECISIONS.md)
 

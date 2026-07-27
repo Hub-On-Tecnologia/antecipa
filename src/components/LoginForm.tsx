@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { LogIn, User, Calendar, CreditCard, Loader2, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
+import { LogIn, Loader2, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
 import { authenticateUser } from '../services/sheetsService';
 import { cn } from '../lib/utils';
 
@@ -82,7 +82,7 @@ export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
       return;
     }
 
-    if (!formData.nome || !formData.dataNascimento || !formData.cpf) {
+    if (!formData.nome.trim() || !formData.dataNascimento || !formData.cpf) {
       setErrorMessage('Por favor, preencha todos os campos.');
       setStatus('error');
       return;

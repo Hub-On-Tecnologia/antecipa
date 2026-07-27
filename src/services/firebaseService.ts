@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, User } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDocs, collection, query, where, serverTimestamp, getDocFromServer, doc as firestoreDoc, updateDoc, addDoc, onSnapshot, orderBy, limit, deleteDoc, writeBatch } from 'firebase/firestore';
+import { getFirestore, setDoc, getDocs, collection, query, where, serverTimestamp, getDocFromServer, doc as firestoreDoc, updateDoc, addDoc, onSnapshot, orderBy, limit, deleteDoc, writeBatch } from 'firebase/firestore';
 import { Receivable } from './sheetsService';
 
 const firebaseConfig = {
@@ -257,18 +257,23 @@ export async function deletePromisedCommissionsBulk(commissionIds: string[]) {
 /**
  * Atualiza múltiplos status do Firestore em lote (Batch).
  */
-export async function updateCommissionsStatusBulk(updates: { id: string, status: 'pending' | 'approved' | 'rejected', stageName: string }[]) {
+export async function updateCommissionsStatusBulk(updates: { id: string, status: 'pending' | 'approved' | 'rejected', stageName: string, bitrixDealId?: string }[]) {
   if (updates.length === 0) return;
   const path = 'promised_commissions';
   const batch = writeBatch(db);
   
   updates.forEach(u => {
     const docRef = firestoreDoc(db, path, u.id);
-    batch.update(docRef, { 
+    const updatePayload: Record<string, any> = { 
       status: u.status, 
       stageName: u.stageName, 
       updatedAt: serverTimestamp() 
-    });
+    };
+    // Persiste o bitrixDealId se fornecido (link entre Firestore e Bitrix CRM)
+    if (u.bitrixDealId) {
+      updatePayload.bitrixDealId = u.bitrixDealId;
+    }
+    batch.update(docRef, updatePayload);
   });
 
   try {

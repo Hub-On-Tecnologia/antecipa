@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Bell, X, Check, Trash2, Info, CheckCircle2, AlertCircle, AlertTriangle } from 'lucide-react';
+import { Bell, Check, Trash2, Info, CheckCircle2, AlertCircle, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { subscribeToNotifications, markNotificationAsRead, deleteNotification } from '../services/firebaseService';
 import { cn } from '../lib/utils';

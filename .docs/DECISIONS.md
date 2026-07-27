@@ -6,24 +6,30 @@
 
 ---
 
-## DEC-012 — 2026-07-23 | Conexão DB-API MariaDB via WireGuard para Base de Colaboradores
+## DEC-012 — 2026-07-23 | Conexão DB-API MariaDB via WireGuard para Base de Colaboradores, Restrições de Segurança e Mapeamento Resiliente do Campo CPF/CNPJ
 
 **Solicitado por:** Pedro (Dono do Projeto)
 **Decidido por:** Pedro + Orquestrador
 
 **Contexto:**
-Por motivos de segurança e topologia de rede na VPS Hostinger, a aplicação não se conecta diretamente na porta do MariaDB (3306). A comunicação ocorre via proxy REST interno (`DB-API`) acessível no IP `http://10.0.3.2:8000` via túnel WireGuard.
+Por motivos de segurança e topologia de rede na VPS Hostinger, a aplicação não se conecta diretamente na porta do MariaDB (3306). A comunicação ocorre via proxy REST interno (`DB-API`) acessível no IP `http://10.0.3.2:8000` via túnel WireGuard. Além disso, a estrutura de colunas da tabela `corpstek_corretores` pode apresentar variações no nome do campo de documento (`cpfcnpj`, `cpf_cnpj`, `cpf`, `documento`).
 
 **Decisão:**
-1. Criar endpoints no servidor Express (`server.ts`: `/api/db/query`, `/api/db/execute`, `/api/db/health`) protegidos por `x-access-token`.
-2. Encaminhar as requisições do servidor Express para a DB-API utilizando o cabeçalho `X-API-Key` e suporte a parâmetros sanitizados com `%s`.
-3. Migrar a busca e validação de colaboradores no `sheetsService.ts` para consultar a tabela `corpstek_corretores` do MariaDB, mantendo fallback gracioso para o Google Sheets em caso de indisponibilidade local ou de rede.
-4. Ajustar `normalizeDate` no `utils.ts` para converter datas ISO (`YYYY-MM-DD`) do MariaDB para conciliação automática com o formulário de login (`DD/MM/YYYY`).
+1. Criar endpoints no servidor Express (`server.ts`: `/api/db/query`, `/api/db/execute`, `/api/db/health`) protegidos por `x-access-token` (chave `ACCESS_TOKEN` / `VITE_ACCESS_TOKEN`).
+2. Encaminhar as requisições do servidor Express para a DB-API utilizando o cabeçalho de autenticação interna `X-API-Key` (`DB_API_KEY`) e a URL base configurada em `DB_API_URL` com suporte a parâmetros sanitizados com `%s`.
+3. Aplicar **restrição estrita de leitura** em `/api/db/query` no Express, permitindo estritamente instruções SQL iniciadas por `SELECT` ou `WITH` e bloqueando qualquer comando de mutação com HTTP 400 Bad Request.
+4. Garantir a **sanitização estrita de erros de banco**: falhas e exceções do MariaDB são registradas apenas no log interno do servidor Express, retornando mensagens genéricas sanitizadas ao navegador para prevenir vazamento de esquemas ou dados sensíveis.
+5. Migrar a busca e validação de colaboradores no `sheetsService.ts` para consultar a tabela `corpstek_corretores` do MariaDB, aplicando os filtros de colaboradores ativos (`administrativo_ativo = 1` e `(data_exclusao IS NULL OR data_exclusao = '1970-01-01 00:00:01')`), utilizando controle de **timeout de 5 segundos** (`AbortSignal.timeout(5000)`) e mantendo fallback gracioso para o Google Sheets em caso de indisponibilidade local ou de rede.
+6. Implementar mapeamento resiliente em cascata para o campo de documento/CPF (`row.cpf || row.CPF || row.cpf_cnpj || row.cpfcnpj || row.documento`), garantindo 100% de compatibilidade independente da variação do nome da coluna no schema do MariaDB.
+7. Padronizar a normalização de CPF (`normalizeCPF` no `utils.ts`) para extrair apenas dígitos e aplicar preenchimento à esquerda com zeros para **11 dígitos** (`clean.padStart(11, '0')`).
+8. Ajustar `normalizeDate` no `utils.ts` para converter datas ISO (`YYYY-MM-DD`) do MariaDB para conciliação automática com o formulário de login (`DD/MM/YYYY`).
 
 **Impacto:**
-- Base de colaboradores migrada para o banco de dados relacional oficial.
-- Credencial `DB_API_KEY` isolada com segurança no servidor Express da VPS Hostinger.
-- Resiliência garantida com fallback automático.
+- Base de colaboradores migrada para o banco de dados relacional oficial (`corpstek_corretores`).
+- Proteção contra mutações não autorizadas no proxy de leitura (`/api/db/query`) e eliminação do vazamento de stack traces/erros de banco.
+- Mapeamento de CPF/CNPJ ultra-resiliente contra alterações ou variações de schema na tabela com garantia de 11 dígitos via `padStart`.
+- Credenciais `DB_API_URL` e `DB_API_KEY` isoladas com segurança no servidor Express da VPS Hostinger.
+- Resiliência garantida com timeout de 5s e fallback automático para Google Sheets.
 
 ---
 

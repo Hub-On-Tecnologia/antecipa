@@ -6,7 +6,8 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function normalizeCPF(cpf: string): string {
-  return cpf.replace(/\D/g, '');
+  const clean = String(cpf || '').replace(/\D/g, '');
+  return clean ? clean.padStart(11, '0') : '';
 }
 
 export function normalizeDate(date: string): string {

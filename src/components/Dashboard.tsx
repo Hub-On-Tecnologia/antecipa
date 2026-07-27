@@ -5,13 +5,12 @@ import { createBitrixDeal, fetchExistingDeals, mapBitrixStageToStatus, mapBitrix
 import { 
   savePromisedCommission, 
   fetchPromisedCommissions, 
-  deletePromisedCommission, 
   logAccess,
   saveAdvancementWithCollateral,
   deletePromisedCommissionsBulk,
   updateCommissionsStatusBulk
 } from '../services/firebaseService';
-import { Loader2, DollarSign, List, ArrowRight, Wallet, History, CheckCircle2, AlertCircle, Shield, Clock, RefreshCw, FileSignature, Search } from 'lucide-react';
+import { Loader2, List, ArrowRight, Wallet, History, Shield, Clock, RefreshCw, FileSignature, Search } from 'lucide-react';
 import { cn } from '../lib/utils';
 import ProposalModal from './ProposalModal';
 import NotificationCenter from './NotificationCenter';
@@ -624,9 +623,15 @@ export default function Dashboard({ userInfo, firebaseUserId, firebaseUserEmail,
                         "text-[9px] font-bold uppercase tracking-[0.2em] mb-1",
                         theme === 'dark' ? "text-amber-500/40" : "text-amber-600/70"
                       )}>Solicitadas</p>
-                      <p className={cn("text-lg font-light text-amber-500/70", theme === 'light' && "text-amber-600")}>
-                        {group.items.filter(item => promisedFromDb.some(p => String(p.receivableId) === String(item.id) && p.status !== 'rejected')).length}
-                      </p>
+                       <p className={cn("text-lg font-light text-amber-500/70", theme === 'light' && "text-amber-600")}>
+                         {group.items.filter(item => promisedFromDb.some(p => 
+                           !p.isCollateral &&
+                           p.status !== 'rejected' &&
+                           String(p.pvId) === String(item.id) &&
+                           String(p.previsaoMes) === String(item.previsaoMes) &&
+                           String(p.previsaoAno) === String(item.previsaoAno)
+                         )).length}
+                       </p>
                     </div>
                   </div>
                 </div>

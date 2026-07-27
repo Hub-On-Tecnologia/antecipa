@@ -42,7 +42,7 @@ async function fetchFromSheet(tab: string): Promise<any> {
     throw new Error("ID da planilha não configurado");
   }
   const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(tab)}`;
-  const response = await fetch(url);
+  const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
   const text = await response.text();
   return JSON.parse(text.substring(47, text.length - 2));
 }
@@ -56,6 +56,7 @@ async function queryDbProxy<T = any>(sql: string, params: any[] = []): Promise<T
       'x-access-token': token,
     },
     body: JSON.stringify({ sql, params }),
+    signal: AbortSignal.timeout(5000),
   });
 
   if (!response.ok) {

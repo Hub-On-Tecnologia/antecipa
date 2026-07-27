@@ -26,10 +26,10 @@ solicitarem **antecipação de comissões** (recebíveis).
 | Estilo | Tailwind CSS v4 + CSS puro |
 | Animações | Framer Motion (pacote `motion`) |
 | Ícones | Lucide React |
-| Backend | Express.js (server.ts) — mínimo |
+| Backend | Express.js (server.ts) — mínimo / proxy seguro |
 | Banco de Estado | Firebase Firestore |
-| Autenticação | Firebase Auth (Google) + validação via Sheets |
-| Fonte de Dados | Google Sheets (API gviz/tq — read-only) |
+| Autenticação | Firebase Auth (Google) + validação via MariaDB (DB-API) com fallback Google Sheets |
+| Fonte de Dados | MariaDB (`corpstek_corretores` via DB-API / WireGuard) + Google Sheets (API gviz/tq) |
 | CRM | Bitrix24 (webhooks REST via Express proxy) |
 | Deploy | VPS Hostinger (`antcp-hubon` via PM2 / Nginx na porta 3001) |
 
@@ -57,12 +57,12 @@ src/
 │   └── Footer.tsx             ← Rodapé global
 │
 ├── services/
-│   ├── sheetsService.ts       ← Leitura da planilha Google (usuários + CR 2025)
+│   ├── sheetsService.ts       ← Validação de usuários (MariaDB/Sheets) + leitura de recebíveis (CR 2025)
 │   ├── firebaseService.ts     ← Firestore CRUD + Auth + Notificações
 │   └── bitrixService.ts       ← Webhooks Bitrix24 (deals)
 │
 └── lib/
-    └── utils.ts               ← Helpers: cn(), normalizeCPF(), normalizeDate(), normalizeName()
+    └── utils.ts               ← Helpers: cn(), normalizeCPF() [padStart 11], normalizeDate(), normalizeName()
 ```
 
 ---
@@ -73,12 +73,18 @@ src/
 1. Usuário acessa o portal
 2. App.tsx verifica VITE_ACCESS_TOKEN (portão de acesso)
    ├── Se não há token configurado → portão aberto
-   ├── Se referrer é Bitrix/CRM → acesso permitido (sem digitar token)
+   ├── Se referrer é Bitrix/CRM ou token temporário → acesso permitido
    └── Se sessão anterior válida → acesso permitido
 3. LoginForm.tsx coleta: Nome, CPF, Data de Nascimento
-4. sheetsService.authenticateUser() valida contra guia "usuários"
-5. Se válido → Firebase Auth (Google) + sessão iniciada
-6. App.tsx atualiza estado: userAuthData + firebaseUser
+4. sheetsService.fetchUsers() consulta primariamente o banco relacional MariaDB
+   (tabela corpstek_corretores via /api/db/query com timeout de 5s),
+   filtrando colaboradores ativos (administrativo_ativo = 1) e realizando
+   mapeamento resiliente de colunas (cpf, cpf_cnpj, cpfcnpj, documento).
+5. Se a DB-API MariaDB falhar ou exceder o timeout de 5s, o sistema utiliza
+   fallback gracioso e transparente para a guia "usuários" do Google Sheets.
+6. authenticateUser() concilia credenciais usando normalizeCPF() (padStart de 11 dígitos).
+7. Se credenciais válidas → Firebase Auth (Google) + sessão iniciada.
+8. App.tsx atualiza estado: userAuthData + firebaseUser.
 ```
 
 ---
@@ -130,8 +136,10 @@ src/
 | `BITRIX_WEBHOOK_URL` | Servidor Express — Criação de deals |
 | `BITRIX_WEBHOOK_WRITE_URL` | Servidor Express — Escrita alternativa |
 | `BITRIX_LIST_URL` | Servidor Express — Listagem de deals |
+| `DB_API_URL` | Servidor Express — URL base do proxy DB-API MariaDB (ex: `http://10.0.3.2:8000`) |
+| `DB_API_KEY` | Servidor Express — Chave secreta enviada em `X-API-Key` para DB-API |
 | `VITE_SHEET_ID` | ID da planilha Google |
-| `VITE_SHEET_TAB_USUARIOS` | Nome da guia de usuários |
+| `VITE_SHEET_TAB_USUARIOS` | Nome da guia de usuários (fallback) |
 | `VITE_SHEET_TAB_CR` | Nome da guia de recebíveis |
 | `VITE_ACCESS_TOKEN` | Token de portão de acesso |
 | `GEMINI_API_KEY` | IA (Gemini) |

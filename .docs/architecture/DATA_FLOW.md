@@ -13,20 +13,28 @@
 [ LoginForm.tsx ] (Insere Nome, CPF, Data Nasc)
     │
     ▼
-[ sheetsService.ts -> authenticateUser() ]
-    │  - Busca planilha Google (Guia: usuários)
-    │  - Normaliza Strings (acentos, maiúsculas, espaços)
-    │  - Compara CPF (apenas dígitos) + Data (apenas dígitos) + Nome
+[ sheetsService.ts -> fetchUsers() / authenticateUser() ]
     │
-    ├── (Se inválido) ──► Retorna null -> Exibe mensagem no LoginForm
+    ├── 1. Consulta Primária: MariaDB via Proxy (/api/db/query) [Timeout: 5s]
+    │      - SQL: SELECT * FROM corpstek_corretores WHERE administrativo_ativo = 1 ...
+    │      - Mapeamento resiliente: row.cpf || row.cpf_cnpj || row.cpfcnpj || row.documento
     │
-    └── (Se válido) ────► Retorna UserData
-                               │
-                               ▼
-                   [ firebaseService.ts -> signInWithGoogle() / auth ]
-                               │
-                               ▼
-                   [ App.tsx ] (Atualiza estado da sessão)
+    ├── (Em caso de erro/timeout 5s na DB-API) ──► 2. Fallback Gracioso: Google Sheets (guia usuários)
+    │
+    ├── 3. Normalização & Conciliação
+    │      - CPF: normalizeCPF() -> extrai números e aplica padStart(11, '0')
+    │      - Data: normalizeDate() -> converte ISO (YYYY-MM-DD) ou DD/MM/YYYY para apenas dígitos
+    │      - Nome: normalizeName() -> remove acentos, caixa baixa e colapsa espaços
+    │
+    ├── (Se credenciais divergentes) ──► Retorna null -> Exibe mensagem amigável no LoginForm
+    │
+    └── (Se credenciais coincidem) ────► Retorna UserData
+                                               │
+                                               ▼
+                                  [ firebaseService.ts -> signInWithGoogle() / auth ]
+                                               │
+                                               ▼
+                                  [ App.tsx ] (Atualiza estado global da sessão)
 ```
 
 ---

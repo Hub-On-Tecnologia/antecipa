@@ -575,7 +575,7 @@ DATA/HORA: ${now.toLocaleString('pt-BR')}
                         <p className={cn("font-bold mb-1", theme === 'dark' ? "text-white/50" : "text-slate-700")}>CLÁUSULA 1 – OBJETO</p>
                         <p>1.1. O presente instrumento tem por objeto a cessão, em caráter irrevogável e irretratável, pelo(a) CEDENTE à CESSIONÁRIA, dos direitos creditórios decorrentes de comissão imobiliária vinculada à operação descrita no quadro-resumo, incluindo venda, locação, parceria, intermediação ou qualquer outro negócio imobiliário relacionado.</p>
                         <p>1.2. A cessão compreende o percentual indicado no quadro-resumo, abrangendo principal, atualização monetária, encargos e demais acessórios eventualmente incidentes sobre o crédito cedido.</p>
-                        <p>1.3. O(a) CEDENTE declara que o crédito cedido é legítimo, existent, exigível e livre de ônus, disputas, cessões anteriores, penhoras ou restrições de qualquer natureza.</p>
+                        <p>1.3. O(a) CEDENTE declara que o crédito cedido é legítimo, existente, exigível e livre de ônus, disputas, cessões anteriores, penhoras ou restrições de qualquer natureza.</p>
                       </div>
 
                       <div>

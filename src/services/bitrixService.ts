@@ -32,7 +32,8 @@ export async function secureBitrixFetch(endpoint: string, options: RequestInit) 
   try {
     const response = await fetch(endpoint, {
       ...options,
-      headers
+      headers,
+      signal: options.signal || AbortSignal.timeout(8000)
     });
     return response;
   } catch (error: any) {

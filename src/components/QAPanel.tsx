@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Play, Send, Search, RefreshCw, X, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Database, ArrowRight, ShieldCheck, Copy, Check } from 'lucide-react';
+import { Send, Search, RefreshCw, X, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Database, ShieldCheck, Copy, Check } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { PV_FIELD, BITRIX_FIELDS, secureBitrixFetch, parseBitrixCurrency } from '../services/bitrixService';
 
