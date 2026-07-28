@@ -7,3 +7,9 @@ coverage/
 .env*
 !.env.example
 firebase-applet-config.json
+
+# Credenciais e configurações locais do VPS (nunca commitar)
+.vps-config
+
+# Documentos internos de análise
+crítica/
