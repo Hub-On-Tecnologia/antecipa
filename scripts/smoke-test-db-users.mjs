@@ -14,18 +14,19 @@
 import { readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
 
-// Lê o ACCESS_TOKEN do .env para autenticar a chamada
+// Usa o dotenv para carregar as variáveis igual ao server.ts
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const envPath = path.join(__dirname, '..', '.env');
-let accessToken = '';
 
-try {
-  const envContent = readFileSync(envPath, 'utf-8');
-  const match = envContent.match(/^ACCESS_TOKEN=(.+)$/m);
-  if (match) accessToken = match[1].trim();
-} catch {
-  console.warn('[smoke] Aviso: .env não encontrado, testando sem token de auth');
+dotenv.config({ path: envPath });
+
+// Tenta pegar ACCESS_TOKEN ou VITE_ACCESS_TOKEN como fallback
+const accessToken = process.env.ACCESS_TOKEN || process.env.VITE_ACCESS_TOKEN || '';
+
+if (!accessToken) {
+  console.warn('[smoke] Aviso: ACCESS_TOKEN não encontrado no .env, requisições podem falhar com 401');
 }
 
 const BASE_URL = process.env.APP_URL || 'http://localhost:3001';
