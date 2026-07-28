@@ -1,0 +1,55 @@
+name: Deploy para VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configura Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instala dependências
+        run: npm ci
+
+      - name: Build (Frontend Vite + Backend esbuild)
+        run: npm run build
+
+      - name: Deploy no VPS via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -e
+            echo "--- Entrando no diretório do projeto ---"
+            cd ${{ secrets.VPS_PROJECT_PATH }}
+
+            echo "--- Puxando últimas alterações do GitHub ---"
+            git pull origin main
+
+            echo "--- Instalando dependências de produção ---"
+            npm ci --omit=dev
+
+            echo "--- Realizando build de produção ---"
+            npm run build
+
+            echo "--- Reiniciando aplicação no PM2 ---"
+            pm2 restart antcp-hubon --update-env || pm2 start ecosystem.config.cjs
+
+            echo "--- Deploy concluído com sucesso! ---"
+            pm2 status antcp-hubon
