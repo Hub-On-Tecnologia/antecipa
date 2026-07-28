@@ -71,13 +71,6 @@ export default function App() {
 
       const params = new URLSearchParams(window.location.search);
       const token = params.get('token') || params.get('ref') || params.get('src');
-      
-      const envToken = import.meta.env.VITE_ACCESS_TOKEN;
-      if (token && envToken && token === envToken) {
-        setIsAccessAllowed(true);
-        sessionStorage.setItem('portal_access_allowed', 'true');
-        return;
-      }
 
       if (!token) return;
 

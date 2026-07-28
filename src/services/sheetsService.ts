@@ -1,4 +1,6 @@
 import { normalizeCPF, normalizeDate, normalizeName } from '../lib/utils';
+import { auth } from './firebaseService';
+
 
 const TAB_NAME = import.meta.env.VITE_SHEET_TAB_USUARIOS ?? 'usuários';
 const TAB_CR = import.meta.env.VITE_SHEET_TAB_CR ?? 'CR 2025';
@@ -48,12 +50,19 @@ async function fetchFromSheet(tab: string): Promise<any> {
 }
 
 async function queryDbProxy<T = any>(sql: string, params: any[] = []): Promise<T[]> {
-  const token = import.meta.env.VITE_ACCESS_TOKEN || '';
+  // Usa o Firebase ID Token do usuário autenticado — nunca exposto no bundle
+  let idToken = '';
+  try {
+    idToken = (await auth.currentUser?.getIdToken()) || '';
+  } catch (tokenErr) {
+    console.warn('[queryDbProxy] Não foi possível obter Firebase ID Token:', tokenErr);
+  }
+
   const response = await fetch('/api/db/query', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-access-token': token,
+      ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {}),
     },
     body: JSON.stringify({ sql, params }),
     signal: AbortSignal.timeout(5000),

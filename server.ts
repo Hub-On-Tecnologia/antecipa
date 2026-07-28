@@ -12,12 +12,45 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 // Enable JSON bodies with a larger limit for base64 file uploads
 app.use(express.json({ limit: "50mb" }));
 
+/**
+ * Verifica se um Firebase ID Token é válido consultando a API do Firebase.
+ * Não requer firebase-admin nem service account — apenas a API Key do projeto.
+ * O token é efêmero (1h de validade) e emitido pelo Firebase Auth.
+ */
+async function verifyFirebaseToken(authHeader: string | undefined): Promise<boolean> {
+  if (!authHeader) return false;
+  const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+  if (!idToken) return false;
+
+  const apiKey = process.env.FIREBASE_API_KEY;
+  if (!apiKey) {
+    console.error('[Auth] FIREBASE_API_KEY não configurado no servidor.');
+    return false;
+  }
+
+  try {
+    const res = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+        signal: AbortSignal.timeout(4000),
+      }
+    );
+    return res.ok;
+  } catch (err) {
+    console.error('[Auth] Falha ao verificar Firebase ID Token:', err);
+    return false;
+  }
+}
+
 const isPlaceholderUrl = (url: string) => {
   return !url || url.includes("seu-dominio") || url.includes("USER_ID") || url.includes("TOKEN");
 };
 
 // Security Middleware for Bitrix API proxy endpoints
-app.use("/api/bitrix", (req, res, next) => {
+app.use("/api/bitrix", async (req, res, next) => {
   if (req.path === "/debug") {
     if (process.env.NODE_ENV === "production") {
       return res.status(403).json({ error: "Endpoint de debug desativado em ambiente de produção." });
@@ -25,27 +58,25 @@ app.use("/api/bitrix", (req, res, next) => {
     return next();
   }
 
-  const token = req.headers["x-access-token"] || req.headers["authorization"];
-  const expectedToken = process.env.ACCESS_TOKEN;
-
-  if (!expectedToken || (token !== expectedToken && token !== `Bearer ${expectedToken}`)) {
-    return res.status(401).json({ error: "Acesso não autorizado ao proxy de integração Bitrix." });
+  const authHeader = (req.headers["authorization"] || req.headers["x-access-token"]) as string | undefined;
+  const valid = await verifyFirebaseToken(authHeader);
+  if (!valid) {
+    return res.status(401).json({ error: "Acesso não autorizado. Token Firebase inválido ou ausente." });
   }
 
   next();
 });
 
 // Security Middleware for DB-API proxy endpoints
-app.use("/api/db", (req, res, next) => {
+app.use("/api/db", async (req, res, next) => {
   if (req.path === "/health") {
     return next();
   }
 
-  const token = req.headers["x-access-token"] || req.headers["authorization"];
-  const expectedToken = process.env.ACCESS_TOKEN;
-
-  if (!expectedToken || (token !== expectedToken && token !== `Bearer ${expectedToken}`)) {
-    return res.status(401).json({ error: "Acesso não autorizado ao proxy de banco de dados (DB-API)." });
+  const authHeader = (req.headers["authorization"] || req.headers["x-access-token"]) as string | undefined;
+  const valid = await verifyFirebaseToken(authHeader);
+  if (!valid) {
+    return res.status(401).json({ error: "Acesso não autorizado. Token Firebase inválido ou ausente." });
   }
 
   next();

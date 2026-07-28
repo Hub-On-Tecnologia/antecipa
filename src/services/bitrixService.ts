@@ -1,14 +1,13 @@
 import { Receivable, UserData } from './sheetsService';
+import { auth } from './firebaseService';
 
 export type UserAuth = UserData;
 
 /**
  * NOTA DE SEGURANÇA:
- * No Vercel/ambientes de hospedagem Frontend, as variáveis de ambiente prefixadas com VITE_ 
- * são injetadas no build e permanecem expostas no bundle JavaScript do navegador.
- * Para uma produção com segurança máxima, o ideal é criar uma Edge Function ou API Route
- * no servidor (ex: /api/bitrix-proxy) que faça o proxy seguro das chamadas, 
- * mantendo as chaves e tokens confidenciais estritamente protegidos no servidor.
+ * A autenticação com o backend é feita via Firebase ID Token (JWT efêmero, 1h de validade).
+ * O token é obtido do usuário autenticado no momento da chamada — nunca exposto no bundle.
+ * O servidor valida o token consultando a API do Firebase antes de processar qualquer requisição.
  */
 
 const CATEGORY_ID = 89;
@@ -19,14 +18,20 @@ export function isPlaceholderUrl(url: string) {
 }
 
 export async function secureBitrixFetch(endpoint: string, options: RequestInit) {
-  const token = import.meta.env.VITE_ACCESS_TOKEN || '';
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> || {}),
   };
 
-  if (token) {
-    headers['x-access-token'] = token;
+  // Usa o Firebase ID Token do usuário autenticado como credencial
+  // É efêmero (1h), único por sessão e não fica exposto no bundle JS
+  try {
+    const idToken = await auth.currentUser?.getIdToken();
+    if (idToken) {
+      headers['Authorization'] = `Bearer ${idToken}`;
+    }
+  } catch (tokenErr) {
+    console.warn('[secureBitrixFetch] Não foi possível obter o Firebase ID Token:', tokenErr);
   }
 
   try {
