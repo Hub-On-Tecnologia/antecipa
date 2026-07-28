@@ -98,7 +98,7 @@ app.get("/api/db/health", async (req, res) => {
   }
 });
 
-app.post("/api/db/query", async (req, res) => {
+app.get("/api/db/users", async (req, res) => {
   const dbApiUrl = process.env.DB_API_URL || "http://10.0.3.2:8000";
   const dbApiKey = process.env.DB_API_KEY;
 
@@ -106,16 +106,9 @@ app.post("/api/db/query", async (req, res) => {
     return res.status(500).json({ error: "Configuração de DB_API_URL ou DB_API_KEY ausente no servidor." });
   }
 
-  const { sql, params } = req.body;
-  if (!sql) {
-    return res.status(400).json({ error: "Parâmetro 'sql' é obrigatório." });
-  }
-
-  // Sanitização e Restrição de Segurança: /api/db/query aceita exclusivamente instruções de leitura (SELECT)
-  const normalizedSql = String(sql).trim().toUpperCase();
-  if (!normalizedSql.startsWith("SELECT") && !normalizedSql.startsWith("WITH")) {
-    return res.status(400).json({ error: "Endpoint restrito a consultas de leitura (SELECT)." });
-  }
+  // A query SQL agora reside com segurança apenas no backend
+  const sql = "SELECT * FROM corpstek_corretores WHERE administrativo_ativo = %s AND (data_exclusao IS NULL OR data_exclusao = %s)";
+  const params = [1, "1970-01-01 00:00:01"];
 
   try {
     const response = await fetch(`${dbApiUrl}/query`, {
@@ -124,7 +117,7 @@ app.post("/api/db/query", async (req, res) => {
         "Content-Type": "application/json",
         "X-API-Key": dbApiKey,
       },
-      body: JSON.stringify({ sql, params: params || [] }),
+      body: JSON.stringify({ sql, params }),
       signal: AbortSignal.timeout(10000),
     });
 
@@ -138,44 +131,6 @@ app.post("/api/db/query", async (req, res) => {
     res.json(data);
   } catch (error: any) {
     console.error("DB-API query error:", error);
-    res.status(500).json({ ok: false, error: "Erro de comunicação com o banco de dados." });
-  }
-});
-
-app.post("/api/db/execute", async (req, res) => {
-  const dbApiUrl = process.env.DB_API_URL || "http://10.0.3.2:8000";
-  const dbApiKey = process.env.DB_API_KEY;
-
-  if (!dbApiUrl || !dbApiKey) {
-    return res.status(500).json({ error: "Configuração de DB_API_URL ou DB_API_KEY ausente no servidor." });
-  }
-
-  const { sql, params } = req.body;
-  if (!sql) {
-    return res.status(400).json({ error: "Parâmetro 'sql' é obrigatório." });
-  }
-
-  try {
-    const response = await fetch(`${dbApiUrl}/execute`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": dbApiKey,
-      },
-      body: JSON.stringify({ sql, params: params || [] }),
-      signal: AbortSignal.timeout(10000),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("DB-API Execute Proxy Error:", errorText);
-      return res.status(response.status).json({ ok: false, error: "Falha na execução no banco de dados interno." });
-    }
-
-    const data = await response.json();
-    res.json(data);
-  } catch (error: any) {
-    console.error("DB-API execute error:", error);
     res.status(500).json({ ok: false, error: "Erro de comunicação com o banco de dados." });
   }
 });

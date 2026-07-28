@@ -49,46 +49,32 @@ async function fetchFromSheet(tab: string): Promise<any> {
   return JSON.parse(text.substring(47, text.length - 2));
 }
 
-async function queryDbProxy<T = any>(sql: string, params: any[] = []): Promise<T[]> {
-  // Usa o Firebase ID Token do usuário autenticado — nunca exposto no bundle
-  let idToken = '';
-  try {
-    idToken = (await auth.currentUser?.getIdToken()) || '';
-  } catch (tokenErr) {
-    console.warn('[queryDbProxy] Não foi possível obter Firebase ID Token:', tokenErr);
-  }
-
-  const response = await fetch('/api/db/query', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {}),
-    },
-    body: JSON.stringify({ sql, params }),
-    signal: AbortSignal.timeout(5000),
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Erro na DB-API Proxy: ${errText}`);
-  }
-
-  const data = await response.json();
-  if (!data || !data.ok) {
-    throw new Error(`Retorno inválido da DB-API: ${JSON.stringify(data)}`);
-  }
-
-  return data.rows as T[];
-}
-
+// queryDbProxy removido: Endpoint dinâmico de SQL era vulnerável a injeção.
+// Rotas específicas (ex: GET /api/db/users) devem ser usadas agora.
 export async function fetchUsers(): Promise<UserData[]> {
-  // 1. Tenta buscar da DB-API MariaDB (corpstek_corretores)
+  // 1. Tenta buscar da DB-API MariaDB (corpstek_corretores) via endpoint seguro
   try {
-    const sql = "SELECT * FROM corpstek_corretores WHERE administrativo_ativo = %s AND (data_exclusao IS NULL OR data_exclusao = %s)";
-    const params = [1, "1970-01-01 00:00:01"];
-    const rows = await queryDbProxy(sql, params);
+    let idToken = '';
+    try {
+      idToken = (await auth.currentUser?.getIdToken()) || '';
+    } catch (tokenErr) {
+      console.warn('[fetchUsers] Não foi possível obter Firebase ID Token:', tokenErr);
+    }
 
-    if (rows && rows.length > 0) {
+    const response = await fetch('/api/db/users', {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {}),
+      },
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const rows = data.rows || [];
+
+      if (rows && rows.length > 0) {
       return rows.map((row: any) => {
         const nome = row.nome || row.NOME || row.nome_corretor || '';
         const dataNascimento = row.datanascimento || row.DATANASCIMENTO || row.data_nascimento || row.nascimento || '';
