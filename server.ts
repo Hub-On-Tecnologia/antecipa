@@ -26,7 +26,7 @@ app.use("/api/bitrix", (req, res, next) => {
   }
 
   const token = req.headers["x-access-token"] || req.headers["authorization"];
-  const expectedToken = process.env.ACCESS_TOKEN;
+  const expectedToken = process.env.ACCESS_TOKEN || process.env.VITE_ACCESS_TOKEN;
 
   if (!expectedToken || (token !== expectedToken && token !== `Bearer ${expectedToken}`)) {
     return res.status(401).json({ error: "Acesso não autorizado ao proxy de integração Bitrix." });
@@ -42,7 +42,7 @@ app.use("/api/db", (req, res, next) => {
   }
 
   const token = req.headers["x-access-token"] || req.headers["authorization"];
-  const expectedToken = process.env.ACCESS_TOKEN;
+  const expectedToken = process.env.ACCESS_TOKEN || process.env.VITE_ACCESS_TOKEN;
 
   if (!expectedToken || (token !== expectedToken && token !== `Bearer ${expectedToken}`)) {
     return res.status(401).json({ error: "Acesso não autorizado ao proxy de banco de dados (DB-API)." });
