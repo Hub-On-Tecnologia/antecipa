@@ -37,7 +37,7 @@ export interface Receivable {
 }
 
 async function fetchFromSheet(tab: string): Promise<any> {
-  const sheetId = import.meta.env.VITE_SHEET_ID;
+  const sheetId = import.meta.env.VITE_SHEET_ID || '1uzQAAUN3dbmBK7p14cBTywTYuG3PNLiZVJtLRUtljnU';
   if (!sheetId) {
     throw new Error("ID da planilha não configurado");
   }
