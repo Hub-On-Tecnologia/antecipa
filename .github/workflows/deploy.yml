@@ -60,6 +60,12 @@ jobs:
             set -e
             cd ${{ secrets.VPS_PROJECT_PATH }}
 
+            echo "--- Parando aplicação para liberar arquivos ---"
+            pm2 stop antcp-hubon || true
+            
+            echo "--- Limpando dependências antigas ---"
+            rm -rf node_modules
+
             echo "--- Instalando dependências de produção ---"
             npm ci --omit=dev
 
