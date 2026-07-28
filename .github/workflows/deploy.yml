@@ -24,6 +24,9 @@ jobs:
       - name: Instala dependências
         run: npm ci
 
+      - name: Roda testes unitários
+        run: npm test
+
       - name: Build (Frontend Vite + Backend esbuild)
         run: npm run build
 
