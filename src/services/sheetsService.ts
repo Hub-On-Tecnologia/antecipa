@@ -47,111 +47,44 @@ async function fetchFromSheet(tab: string): Promise<any> {
   return JSON.parse(text.substring(47, text.length - 2));
 }
 
-async function queryDbProxy<T = any>(sql: string, params: any[] = []): Promise<T[]> {
+export async function fetchUsers(): Promise<UserData[]> {
   const token = import.meta.env.VITE_ACCESS_TOKEN || '';
-  const response = await fetch('/api/db/query', {
-    method: 'POST',
+  const response = await fetch('/api/db/users', {
+    method: 'GET',
     headers: {
       'Content-Type': 'application/json',
       'x-access-token': token,
     },
-    body: JSON.stringify({ sql, params }),
-    signal: AbortSignal.timeout(5000),
+    signal: AbortSignal.timeout(8000),
   });
 
   if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Erro na DB-API Proxy: ${errText}`);
+    throw new Error(`Erro ao buscar usuários no servidor: ${response.status}`);
   }
 
   const data = await response.json();
-  if (!data || !data.ok) {
-    throw new Error(`Retorno inválido da DB-API: ${JSON.stringify(data)}`);
-  }
+  const rows: any[] = data.rows || [];
 
-  return data.rows as T[];
-}
+  return rows.map((row: any) => {
+    const nome = row.nome || row.NOME || row.nome_corretor || '';
+    const dataNascimento = row.datanascimento || row.DATANASCIMENTO || row.data_nascimento || row.nascimento || '';
+    const cpf = row.cpf || row.CPF || row.cpf_cnpj || row.cpfcnpj || row.documento || '';
+    const empresa = row.empresa || row.EMPRESA || '';
+    const cargo = row.cargo || row.CARGO || row.funcao || '';
+    const superintendencia = row.superintendencia || row.SUPERINTENDENCIA || '';
+    const loja = row.loja || row.LOJA || '';
 
-export async function fetchUsers(): Promise<UserData[]> {
-  // 1. Tenta buscar da DB-API MariaDB (corpstek_corretores)
-  try {
-    const sql = "SELECT * FROM corpstek_corretores WHERE administrativo_ativo = %s AND (data_exclusao IS NULL OR data_exclusao = %s)";
-    const params = [1, "1970-01-01 00:00:01"];
-    const rows = await queryDbProxy(sql, params);
-
-    if (rows && rows.length > 0) {
-      return rows.map((row: any) => {
-        const nome = row.nome || row.NOME || row.nome_corretor || '';
-        const dataNascimento = row.datanascimento || row.DATANASCIMENTO || row.data_nascimento || row.nascimento || '';
-        const cpf = row.cpf || row.CPF || row.cpf_cnpj || row.cpfcnpj || row.documento || '';
-
-        const empresa = row.empresa || row.EMPRESA || '';
-        const cargo = row.cargo || row.CARGO || row.funcao || '';
-        const superintendencia = row.superintendencia || row.SUPERINTENDENCIA || '';
-        const loja = row.loja || row.LOJA || '';
-
-        return {
-          nome: String(nome),
-          dataNascimento: String(dataNascimento),
-          cpf: String(cpf),
-          empresa: String(empresa),
-          cargo: String(cargo),
-          superintendencia: String(superintendencia),
-          loja: String(loja),
-          allFields: row
-        };
-      });
-    }
-  } catch (dbError) {
-    console.warn('Busca no MariaDB via DB-API indisponível ou falhou, utilizando fallback Google Sheets:', dbError);
-  }
-
-  // 2. Fallback: Google Sheets (guia usuários)
-  try {
-    const jsonData = await fetchFromSheet(TAB_NAME);
-    const rows = jsonData.table.rows;
-    const cols = jsonData.table.cols;
-
-    return rows.map((row: any) => {
-      const nomeCell = row.c[3]?.v || '';
-      const dataCell = row.c[6]?.f || row.c[6]?.v || '';
-      const cpfCell = row.c[13]?.f || row.c[13]?.v || '';
-      
-      const allFields: Record<string, any> = {};
-      let empresa = '';
-      let cargo = '';
-      let superintendencia = '';
-      let loja = '';
-
-      row.c.forEach((cell: any, idx: number) => {
-        const label = cols[idx]?.label || `Col${idx}`;
-        const val = cell?.v || '';
-        allFields[label] = val;
-
-        const lowLabel = label.toLowerCase();
-        if (lowLabel.includes('empresa')) empresa = String(val);
-        if (lowLabel.includes('cargo') || lowLabel.includes('função')) cargo = String(val);
-        if (lowLabel.includes('superintendência')) superintendencia = String(val);
-      });
-
-      // Especificamente Coluna S para Loja (index 18)
-      loja = String(row.c[18]?.v || '');
-
-      return {
-        nome: String(nomeCell),
-        dataNascimento: String(dataCell),
-        cpf: String(cpfCell),
-        empresa,
-        cargo,
-        superintendencia,
-        loja,
-        allFields
-      };
-    });
-  } catch (error) {
-    console.error('Erro ao buscar usuários (Google Sheets fallback):', error);
-    return [];
-  }
+    return {
+      nome: String(nome),
+      dataNascimento: String(dataNascimento),
+      cpf: String(cpf),
+      empresa: String(empresa),
+      cargo: String(cargo),
+      superintendencia: String(superintendencia),
+      loja: String(loja),
+      allFields: row
+    };
+  });
 }
 
 
