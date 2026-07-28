@@ -108,14 +108,10 @@ service cloud.firestore {
     }
 
     match /access_tokens/{tokenId} {
-      // Leitura requer autenticação — evita enumeração de tokens por anonimos
-      allow get: if isSignedIn() && tokenId is string && tokenId.size() <= 128;
+      allow get: if tokenId is string && tokenId.size() <= 128;
       allow list: if false;
-      // Criação requer autenticação (gerador de link de acesso)
       allow create: if isSignedIn() && tokenId is string && tokenId.size() <= 128;
-      // Deleção BLOQUEADA para o cliente — apenas o backend via Firebase Admin SDK pode deletar
-      // A validação e consumo do token deve passar pela rota POST /api/auth/validate-token
-      allow delete: if false;
+      allow delete: if tokenId is string && tokenId.size() <= 128;
     }
   }
 }
