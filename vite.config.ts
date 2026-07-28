@@ -25,6 +25,11 @@ export default defineConfig(({mode}) => {
     test: {
       globals: true,
       environment: 'node',
+      env: {
+        VITE_FIREBASE_API_KEY: 'test-api-key',
+        VITE_FIREBASE_PROJECT_ID: 'test-project',
+        VITE_FIREBASE_APP_ID: 'test-app-id',
+      },
       include: ['src/**/*.{test,spec}.{ts,tsx}'],
       coverage: {
         provider: 'v8',
