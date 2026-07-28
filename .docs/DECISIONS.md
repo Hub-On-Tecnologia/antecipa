@@ -6,6 +6,21 @@
 
 ---
 
+## DEC-013 — 2026-07-28 | Estratégia de Build Local na VPS e Pós-Mortem de CI/CD
+
+**Solicitado por:** Pedro (Dono do Projeto)  
+**Decidido por:** Pedro + Orquestrador
+
+**Contexto:**  
+Durante a tentativa de compilação em ambiente CI/CD (GitHub Actions), o comando `npm run build` gerou um bundle do Vite sem as variáveis de ambiente `VITE_FIREBASE_*` (que pertencem ao `.env` e não vão ao Git). Isso resultou em falha na inicialização do Firebase no navegador (`auth/invalid-api-key`) e indisponibilidade temporária.
+
+**Decisão:**  
+1. Manter o repositório restaurado no estado estável anterior (`fe0bfb3`).  
+2. Registrar o relatório de lições aprendidas e causa raiz em [.docs/POST_MORTEM_2026-07-28.md](file:///c:/Users/pedro/Desktop/Antigravity/Antecipa/.docs/POST_MORTEM_2026-07-28.md).  
+3. Definir que futuros deploys deverão executar o `npm run build` diretamente no VPS (onde o arquivo `.env` de produção reside), garantindo compilação fidedigna com as credenciais reais da aplicação.
+
+---
+
 ## DEC-012 — 2026-07-23 | Conexão DB-API MariaDB via WireGuard para Base de Colaboradores, Restrições de Segurança e Mapeamento Resiliente do Campo CPF/CNPJ
 
 **Solicitado por:** Pedro (Dono do Projeto)
