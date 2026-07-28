@@ -12,45 +12,12 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 // Enable JSON bodies with a larger limit for base64 file uploads
 app.use(express.json({ limit: "50mb" }));
 
-/**
- * Verifica se um Firebase ID Token é válido consultando a API do Firebase.
- * Não requer firebase-admin nem service account — apenas a API Key do projeto.
- * O token é efêmero (1h de validade) e emitido pelo Firebase Auth.
- */
-async function verifyFirebaseToken(authHeader: string | undefined): Promise<boolean> {
-  if (!authHeader) return false;
-  const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
-  if (!idToken) return false;
-
-  const apiKey = process.env.FIREBASE_API_KEY;
-  if (!apiKey) {
-    console.error('[Auth] FIREBASE_API_KEY não configurado no servidor.');
-    return false;
-  }
-
-  try {
-    const res = await fetch(
-      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken }),
-        signal: AbortSignal.timeout(4000),
-      }
-    );
-    return res.ok;
-  } catch (err) {
-    console.error('[Auth] Falha ao verificar Firebase ID Token:', err);
-    return false;
-  }
-}
-
 const isPlaceholderUrl = (url: string) => {
   return !url || url.includes("seu-dominio") || url.includes("USER_ID") || url.includes("TOKEN");
 };
 
 // Security Middleware for Bitrix API proxy endpoints
-app.use("/api/bitrix", async (req, res, next) => {
+app.use("/api/bitrix", (req, res, next) => {
   if (req.path === "/debug") {
     if (process.env.NODE_ENV === "production") {
       return res.status(403).json({ error: "Endpoint de debug desativado em ambiente de produção." });
@@ -58,25 +25,27 @@ app.use("/api/bitrix", async (req, res, next) => {
     return next();
   }
 
-  const authHeader = (req.headers["authorization"] || req.headers["x-access-token"]) as string | undefined;
-  const valid = await verifyFirebaseToken(authHeader);
-  if (!valid) {
-    return res.status(401).json({ error: "Acesso não autorizado. Token Firebase inválido ou ausente." });
+  const token = req.headers["x-access-token"] || req.headers["authorization"];
+  const expectedToken = process.env.ACCESS_TOKEN;
+
+  if (!expectedToken || (token !== expectedToken && token !== `Bearer ${expectedToken}`)) {
+    return res.status(401).json({ error: "Acesso não autorizado ao proxy de integração Bitrix." });
   }
 
   next();
 });
 
 // Security Middleware for DB-API proxy endpoints
-app.use("/api/db", async (req, res, next) => {
+app.use("/api/db", (req, res, next) => {
   if (req.path === "/health") {
     return next();
   }
 
-  const authHeader = (req.headers["authorization"] || req.headers["x-access-token"]) as string | undefined;
-  const valid = await verifyFirebaseToken(authHeader);
-  if (!valid) {
-    return res.status(401).json({ error: "Acesso não autorizado. Token Firebase inválido ou ausente." });
+  const token = req.headers["x-access-token"] || req.headers["authorization"];
+  const expectedToken = process.env.ACCESS_TOKEN;
+
+  if (!expectedToken || (token !== expectedToken && token !== `Bearer ${expectedToken}`)) {
+    return res.status(401).json({ error: "Acesso não autorizado ao proxy de banco de dados (DB-API)." });
   }
 
   next();
@@ -98,7 +67,7 @@ app.get("/api/db/health", async (req, res) => {
   }
 });
 
-app.get("/api/db/users", async (req, res) => {
+app.post("/api/db/query", async (req, res) => {
   const dbApiUrl = process.env.DB_API_URL || "http://10.0.3.2:8000";
   const dbApiKey = process.env.DB_API_KEY;
 
@@ -106,9 +75,16 @@ app.get("/api/db/users", async (req, res) => {
     return res.status(500).json({ error: "Configuração de DB_API_URL ou DB_API_KEY ausente no servidor." });
   }
 
-  // A query SQL agora reside com segurança apenas no backend
-  const sql = "SELECT * FROM corpstek_corretores WHERE administrativo_ativo = %s AND (data_exclusao IS NULL OR data_exclusao = %s)";
-  const params = [1, "1970-01-01 00:00:01"];
+  const { sql, params } = req.body;
+  if (!sql) {
+    return res.status(400).json({ error: "Parâmetro 'sql' é obrigatório." });
+  }
+
+  // Sanitização e Restrição de Segurança: /api/db/query aceita exclusivamente instruções de leitura (SELECT)
+  const normalizedSql = String(sql).trim().toUpperCase();
+  if (!normalizedSql.startsWith("SELECT") && !normalizedSql.startsWith("WITH")) {
+    return res.status(400).json({ error: "Endpoint restrito a consultas de leitura (SELECT)." });
+  }
 
   try {
     const response = await fetch(`${dbApiUrl}/query`, {
@@ -117,7 +93,7 @@ app.get("/api/db/users", async (req, res) => {
         "Content-Type": "application/json",
         "X-API-Key": dbApiKey,
       },
-      body: JSON.stringify({ sql, params }),
+      body: JSON.stringify({ sql, params: params || [] }),
       signal: AbortSignal.timeout(10000),
     });
 
@@ -131,6 +107,44 @@ app.get("/api/db/users", async (req, res) => {
     res.json(data);
   } catch (error: any) {
     console.error("DB-API query error:", error);
+    res.status(500).json({ ok: false, error: "Erro de comunicação com o banco de dados." });
+  }
+});
+
+app.post("/api/db/execute", async (req, res) => {
+  const dbApiUrl = process.env.DB_API_URL || "http://10.0.3.2:8000";
+  const dbApiKey = process.env.DB_API_KEY;
+
+  if (!dbApiUrl || !dbApiKey) {
+    return res.status(500).json({ error: "Configuração de DB_API_URL ou DB_API_KEY ausente no servidor." });
+  }
+
+  const { sql, params } = req.body;
+  if (!sql) {
+    return res.status(400).json({ error: "Parâmetro 'sql' é obrigatório." });
+  }
+
+  try {
+    const response = await fetch(`${dbApiUrl}/execute`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": dbApiKey,
+      },
+      body: JSON.stringify({ sql, params: params || [] }),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("DB-API Execute Proxy Error:", errorText);
+      return res.status(response.status).json({ ok: false, error: "Falha na execução no banco de dados interno." });
+    }
+
+    const data = await response.json();
+    res.json(data);
+  } catch (error: any) {
+    console.error("DB-API execute error:", error);
     res.status(500).json({ ok: false, error: "Erro de comunicação com o banco de dados." });
   }
 });
