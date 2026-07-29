@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { LogIn, Loader2, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
-import { authenticateUser } from '../services/sheetsService';
+import { bindBrokerIdentity, UserData } from '../services/sheetsService';
 import { cn } from '../lib/utils';
 
 interface LoginFormProps {
-  onLoginSuccess: (userInfo: { nome: string; dataNascimento: string; cpf: string }) => void;
+  onLoginSuccess: (userInfo: UserData) => void;
 }
 
 export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
@@ -92,22 +92,25 @@ export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
     setErrorMessage('');
 
     try {
-      const foundUser = await authenticateUser(
+      // A conferência acontece no SERVIDOR, contra o MariaDB. Este componente
+      // apenas envia e exibe o resultado — nenhuma comparação roda aqui.
+      const resultado = await bindBrokerIdentity(
         formData.nome,
         formData.dataNascimento,
         formData.cpf
       );
 
-      if (foundUser) {
+      if (resultado.ok && resultado.broker) {
         localStorage.setItem('antecipa_login_attempts', '0');
         localStorage.removeItem('antecipa_login_lockout_until');
         setLockoutTimeLeft(0);
         setStatus('success');
+        const brokerConfirmado = resultado.broker;
         setTimeout(() => {
-          onLoginSuccess(foundUser);
+          onLoginSuccess(brokerConfirmado);
         }, 1000);
       } else {
-        handleFailedAttempt();
+        handleFailedAttempt(resultado.error);
       }
     } catch (error) {
       handleFailedAttempt('Ocorreu um erro ao validar seus dados. Tente novamente mais tarde.');

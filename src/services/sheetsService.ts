@@ -1,4 +1,6 @@
-import { normalizeCPF, normalizeDate, normalizeName } from '../lib/utils';
+// normalizeCPF/normalizeDate saíram daqui: a comparação de identidade passou
+// a ser feita no servidor (RS-04). O cliente não conhece mais CPF de ninguém.
+import { normalizeName } from '../lib/utils';
 import { auth } from './firebaseService';
 
 const TAB_NAME = import.meta.env.VITE_SHEET_TAB_USUARIOS ?? 'usuários';
@@ -49,62 +51,6 @@ async function fetchFromSheet(tab: string): Promise<any> {
   return JSON.parse(text.substring(47, text.length - 2));
 }
 
-export async function fetchUsers(): Promise<UserData[]> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-
-  const user = auth.currentUser;
-  if (user) {
-    try {
-      const idToken = await user.getIdToken();
-      headers['Authorization'] = `Bearer ${idToken}`;
-    } catch (err) {
-      console.warn('[fetchUsers] Erro ao obter ID Token do Firebase:', err);
-    }
-  }
-
-  const response = await fetch('/api/db/users', {
-    method: 'GET',
-    headers,
-    signal: AbortSignal.timeout(8000),
-  });
-
-
-  if (!response.ok) {
-    throw new Error(`Erro ao buscar usuários no servidor: ${response.status}`);
-  }
-
-  const data = await response.json();
-  const rows: any[] = data.rows || [];
-
-  return rows.map((row: any) => {
-    const nome = row.nome || row.NOME || row.nome_corretor || '';
-    const dataNascimento = row.datanascimento || row.DATANASCIMENTO || row.data_nascimento || row.nascimento || '';
-    const cpf = row.cpf || row.CPF || row.cpf_cnpj || row.cpfcnpj || row.documento || '';
-    const empresa = row.empresa || row.EMPRESA || '';
-    const cargo = row.cargo || row.CARGO || row.funcao || '';
-    const superintendencia = row.superintendencia || row.SUPERINTENDENCIA || '';
-    const loja = row.loja || row.LOJA || '';
-
-    return {
-      nome: String(nome),
-      dataNascimento: String(dataNascimento),
-      cpf: String(cpf),
-      empresa: String(empresa),
-      cargo: String(cargo),
-      superintendencia: String(superintendencia),
-      loja: String(loja),
-      allFields: row
-    };
-  });
-}
-
-
-/**
- * Busca os recebíveis (comissões) para um usuário específico.
- * Filtra com base no nome do corretor, líder ou cargo de gestão.
- */
 export async function fetchReceivables(user: UserData): Promise<Receivable[]> {
   try {
     const jsonData = await fetchFromSheet(TAB_CR);
@@ -197,20 +143,75 @@ export async function fetchReceivables(user: UserData): Promise<Receivable[]> {
   }
 }
 
-export async function authenticateUser(nome: string, dataNascimento: string, cpf: string): Promise<UserData | null> {
-  const users = await fetchUsers();
-  
-  const targetNome = normalizeName(nome);
-  const targetData = normalizeDate(dataNascimento);
-  const targetCPF = normalizeCPF(cpf);
+/**
+ * Cabecalho de autenticacao com o ID Token do Firebase.
+ */
+async function authHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const user = auth.currentUser;
+  if (user) {
+    try {
+      headers['Authorization'] = `Bearer ${await user.getIdToken()}`;
+    } catch (err) {
+      console.warn('[auth] Falha ao obter ID Token do Firebase:', err);
+    }
+  }
+  return headers;
+}
 
-  const foundUser = users.find(user => {
-    return (
-      normalizeName(user.nome) === targetNome &&
-      normalizeDate(user.dataNascimento) === targetData &&
-      normalizeCPF(user.cpf) === targetCPF
-    );
+/**
+ * Identidade do corretor a partir do VINCULO no servidor.
+ *
+ * Antes, a pagina baixava a base inteira de corretores e comparava
+ * nome/nascimento/CPF localmente — o que entregava dados pessoais de todos
+ * os corretores a qualquer visitante e nao ligava a conta Google ao corretor.
+ * Agora quem decide e o servidor; o navegador so pergunta.
+ */
+export async function fetchCurrentBroker(): Promise<{ isAdmin: boolean; bound: boolean; broker: UserData | null }> {
+  const response = await fetch('/api/auth/me', {
+    method: 'GET',
+    headers: await authHeaders(),
+    credentials: 'same-origin',
+    signal: AbortSignal.timeout(15000),
   });
 
-  return foundUser || null;
+  if (response.status === 401) return { isAdmin: false, bound: false, broker: null };
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || `Erro ao consultar identidade: ${response.status}`);
+  }
+
+  return response.json();
 }
+
+/**
+ * Primeiro acesso: envia os dados ao servidor, que confere contra o MariaDB e
+ * amarra o corretor a esta conta Google. Nenhuma comparacao acontece aqui.
+ */
+export async function bindBrokerIdentity(
+  nome: string,
+  dataNascimento: string,
+  cpf: string,
+): Promise<{ ok: boolean; broker?: UserData; error?: string }> {
+  const response = await fetch('/api/auth/bind', {
+    method: 'POST',
+    headers: await authHeaders(),
+    credentials: 'same-origin',
+    body: JSON.stringify({ nome, dataNascimento, cpf }),
+    signal: AbortSignal.timeout(20000),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (response.ok && data.bound) {
+    return { ok: true, broker: data.broker };
+  }
+
+  if (response.status === 429) {
+    return { ok: false, error: 'Muitas tentativas. Aguarde alguns minutos antes de tentar de novo.' };
+  }
+
+  return { ok: false, error: data.error || 'Nao foi possivel validar seus dados.' };
+}
+

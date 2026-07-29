@@ -334,6 +334,43 @@ async function queryDbApi(sql: string, params: any[]): Promise<any[]> {
  */
 type Binding = { cpf: string; nome: string; email: string | null };
 
+/** Corretores ativos. Consulta fica sempre no servidor — nunca vai ao navegador. */
+async function fetchCorretoresAtivos(): Promise<any[]> {
+  return queryDbApi(
+    "SELECT * FROM corpstek_corretores WHERE administrativo_ativo = %s AND (data_exclusao IS NULL OR data_exclusao = %s)",
+    [1, "1970-01-01 00:00:01"],
+  );
+}
+
+/** Lê o CPF da linha cobrindo as variações de nome de coluna existentes na base. */
+function cpfDaLinha(row: any): string {
+  return String(row.cpf || row.CPF || row.cpf_cnpj || row.cpfcnpj || row.documento || "");
+}
+
+/**
+ * Converte a linha do MariaDB no formato que o frontend já consome.
+ * Devolve apenas os campos usados pela interface — o restante da linha não
+ * precisa trafegar (RS-06, menor privilégio).
+ */
+function mapCorretor(row: any) {
+  const nome = String(row.nome || row.NOME || row.nome_corretor || "");
+  const empresa = String(row.empresa || row.EMPRESA || "");
+  const cargo = String(row.cargo || row.CARGO || row.funcao || "");
+  const superintendencia = String(row.superintendencia || row.SUPERINTENDENCIA || "");
+  const loja = String(row.loja || row.LOJA || "");
+
+  return {
+    nome,
+    dataNascimento: "",              // não é mais necessário no cliente
+    cpf: maskCpf(cpfDaLinha(row)),   // mascarado: a interface só o exibe
+    empresa,
+    cargo,
+    superintendencia,
+    loja,
+    allFields: { Empresa: empresa, Cargo: cargo, "Superintendência": superintendencia, Loja: loja },
+  };
+}
+
 async function getBinding(uid: string): Promise<Binding | null> {
   const snap = await getFirestore().collection("user_bindings").doc(uid).get();
   if (!snap.exists) return null;
@@ -388,11 +425,21 @@ app.get("/api/auth/me", dualAuthMiddleware, async (req, res) => {
 
   try {
     const binding = await getBinding(user.uid);
-    return res.status(200).json({
-      isAdmin: isUserAllowed(user),
-      bound: Boolean(binding),
-      broker: binding ? { nome: binding.nome, cpf: maskCpf(binding.cpf) } : null,
-    });
+    if (!binding) {
+      return res.status(200).json({ isAdmin: isUserAllowed(user), bound: false, broker: null });
+    }
+
+    // Relê o cadastro a cada acesso: corretor desativado no CRM perde o
+    // acesso automaticamente, sem ninguém precisar mexer em lista nenhuma.
+    const rows = await fetchCorretoresAtivos();
+    const linha = rows.find((row: any) => normalizeCPF(cpfDaLinha(row)) === binding.cpf);
+
+    if (!linha) {
+      console.warn(`[Auth] Vínculo existe mas corretor não está ativo uid=${user.uid}`);
+      return res.status(403).json({ error: "Cadastro de corretor inativo ou não encontrado.", inactive: true });
+    }
+
+    return res.status(200).json({ isAdmin: isUserAllowed(user), bound: true, broker: mapCorretor(linha) });
   } catch (err: any) {
     console.error("[Auth] Erro ao consultar vínculo:", err.message);
     return res.status(500).json({ error: "Erro ao consultar vínculo." });
@@ -425,19 +472,15 @@ app.post("/api/auth/bind", bindLimiter, dualAuthMiddleware, async (req, res) => 
   try {
     const db = getFirestore();
 
-    // Já vinculado? Idempotente: devolve o vínculo existente.
+    // Já vinculado? Idempotente.
     const existing = await getBinding(user.uid);
-    if (existing) {
-      return res.status(200).json({ bound: true, broker: { nome: existing.nome, cpf: maskCpf(existing.cpf) } });
-    }
+    const rows = await fetchCorretoresAtivos();
 
-    // Consulta os corretores ativos e confere AQUI. Mantido SELECT * porque o
-    // nome real da coluna de CPF varia na base (cpf / cpfcnpj / documento) e
-    // a normalização abaixo cobre todas — nada disso chega ao navegador.
-    const rows = await queryDbApi(
-      "SELECT * FROM corpstek_corretores WHERE administrativo_ativo = %s AND (data_exclusao IS NULL OR data_exclusao = %s)",
-      [1, "1970-01-01 00:00:01"],
-    );
+    if (existing) {
+      const linha = rows.find((row: any) => normalizeCPF(cpfDaLinha(row)) === existing.cpf);
+      if (!linha) return res.status(403).json({ error: "Cadastro de corretor inativo.", inactive: true });
+      return res.status(200).json({ bound: true, broker: mapCorretor(linha) });
+    }
 
     const alvoNome = normalizeName(String(nome));
     const alvoData = normalizeDate(String(dataNascimento));
@@ -446,11 +489,10 @@ app.post("/api/auth/bind", bindLimiter, dualAuthMiddleware, async (req, res) => 
     const encontrado = rows.find((row: any) => {
       const rowNome = row.nome || row.NOME || row.nome_corretor || "";
       const rowData = row.datanascimento || row.DATANASCIMENTO || row.data_nascimento || row.nascimento || "";
-      const rowCpf = row.cpf || row.CPF || row.cpf_cnpj || row.cpfcnpj || row.documento || "";
       return (
         normalizeName(String(rowNome)) === alvoNome &&
         normalizeDate(String(rowData)) === alvoData &&
-        normalizeCPF(String(rowCpf)) === alvoCpf
+        normalizeCPF(cpfDaLinha(row)) === alvoCpf
       );
     });
 
@@ -489,7 +531,7 @@ app.post("/api/auth/bind", bindLimiter, dualAuthMiddleware, async (req, res) => 
     }
 
     console.log(`[Auth] Vínculo criado uid=${user.uid}`);
-    return res.status(200).json({ bound: true, broker: { nome: nomeEncontrado, cpf: maskCpf(alvoCpf) } });
+    return res.status(200).json({ bound: true, broker: mapCorretor(encontrado) });
   } catch (err: any) {
     console.error("[Auth] Erro na vinculação:", err.message);
     return res.status(500).json({ error: "Erro ao validar seus dados. Tente novamente." });

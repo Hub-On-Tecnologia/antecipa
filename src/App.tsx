@@ -12,6 +12,7 @@ import InstitutionalPage from './components/InstitutionalPage';
 import TutorialPage from './components/TutorialPage';
 import QAPanel from './components/QAPanel';
 import { UserAuth } from './services/bitrixService';
+import { fetchCurrentBroker } from './services/sheetsService';
 import { cn } from './lib/utils';
 import { auth, onAuthStateChanged, signInWithGoogle, User } from './services/firebaseService';
 
@@ -19,6 +20,9 @@ export default function App() {
   const [userAuthData, setUserAuthData] = useState<UserAuth | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  // Enquanto o servidor resolve o vínculo, não sabemos ainda se o corretor
+  // precisa ou não confirmar identidade — evita piscar o formulário à toa.
+  const [isResolvingBroker, setIsResolvingBroker] = useState(false);
   const [isValidatingToken, setIsValidatingToken] = useState(false);
   const [isGeneratingToken, setIsGeneratingToken] = useState(false);
   const [isQAPanelOpen, setIsQAPanelOpen] = useState(false);
@@ -50,6 +54,37 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  // Identidade do corretor vem do VÍNCULO no servidor (RS-04). Se a conta já
+  // estiver vinculada, o corretor não precisa digitar CPF nenhuma outra vez.
+  // Se não estiver, o LoginForm aparece para a confirmação de primeiro acesso.
+  useEffect(() => {
+    if (!firebaseUser) {
+      setUserAuthData(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsResolvingBroker(true);
+
+    (async () => {
+      try {
+        const resultado = await fetchCurrentBroker();
+        if (cancelled) return;
+        if (resultado.bound && resultado.broker) {
+          setUserAuthData(resultado.broker);
+        }
+      } catch (err) {
+        console.error('Erro ao resolver identidade do corretor:', err);
+      } finally {
+        if (!cancelled) setIsResolvingBroker(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [firebaseUser]);
 
   // Portão de acesso: sessão existente primeiro, token de uso único depois (RS-08).
   // Quem decide é sempre o servidor — o cookie de sessão é httpOnly e assinado,
