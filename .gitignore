@@ -10,4 +10,5 @@ firebase-applet-config.json
 firebase-service-account*.json
 *-key.json
 *.pem
-
+.vps-config
+crítica/
