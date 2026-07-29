@@ -110,5 +110,16 @@ service cloud.firestore {
     match /access_tokens/{tokenId} {
       allow get, list, create, update, delete: if false;
     }
+
+    // Vínculo conta Google <-> corretor. Escrito e lido apenas pelo servidor
+    // via Admin SDK, que ignora estas regras. Se o cliente pudesse escrever
+    // aqui, qualquer um se declararia qualquer corretor.
+    match /user_bindings/{uid} {
+      allow get, list, create, update, delete: if false;
+    }
+
+    match /corretor_bindings/{cpf} {
+      allow get, list, create, update, delete: if false;
+    }
   }
 }

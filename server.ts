@@ -10,6 +10,9 @@ import { getAuth, DecodedIdToken } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import rateLimit from "express-rate-limit";
 import cookieParser from "cookie-parser";
+// Mesmas funções usadas pelo frontend: a normalização precisa ser idêntica dos
+// dois lados, senão um corretor válido falharia na vinculação.
+import { normalizeCPF, normalizeDate, normalizeName } from "./src/lib/utils";
 
 // Load environment variables
 dotenv.config();
@@ -186,7 +189,25 @@ const isPlaceholderUrl = (url: string) => {
 
 
 /**
- * Valida se o usuário autenticado via Firebase consta na allowlist de autorização (RS-04).
+ * Modelo de autorização (RS-04)
+ * ------------------------------
+ * Há dois perfis distintos, e confundi-los quebra o portal:
+ *
+ * - ADMIN: consta em ALLOWED_EMAILS ou tem custom claim. Emite tokens de
+ *   acesso e consulta a base de corretores. É uma lista curta e manual.
+ *
+ * - CORRETOR: qualquer conta Google VINCULADA a um corretor ativo no
+ *   MariaDB. Não existe lista para manter — quem está ativo na base entra,
+ *   quem é desativado perde o acesso automaticamente.
+ *
+ * Por isso dualAuthMiddleware faz apenas AUTENTICAÇÃO (quem é você). A
+ * AUTORIZAÇÃO (o que você pode) fica em requireAdmin / requireBoundBroker,
+ * aplicados endpoint a endpoint. Nenhum endpoint sob /api pode ficar só com
+ * dualAuthMiddleware — INV-6, negar por padrão.
+ */
+
+/**
+ * Valida se o usuário autenticado via Firebase consta na allowlist de ADMIN.
  */
 function isUserAllowed(decodedToken: DecodedIdToken): boolean {
   if (decodedToken.admin === true || decodedToken.allowed === true) {
@@ -228,12 +249,8 @@ export async function dualAuthMiddleware(req: express.Request, res: express.Resp
     const decodedToken = await verifyFirebaseIdToken(candidateIdToken);
 
     if (decodedToken) {
-      // RS-04: Exigir allowlist além da autenticação. Conta fora da allowlist -> 403
-      if (!isUserAllowed(decodedToken)) {
-        console.warn(`[AUTH] path=forbidden user=${decodedToken.uid} endpoint=${req.originalUrl}`);
-        return res.status(403).json({ error: "Acesso negado: Conta não autorizada na allowlist." });
-      }
-
+      // Apenas autenticação aqui. A autorização é responsabilidade de
+      // requireAdmin / requireBoundBroker no próprio endpoint.
       (req as any).user = decodedToken;
       console.log(`[AUTH] path=jwt user=${decodedToken.uid} endpoint=${req.originalUrl}`);
       return next();
@@ -245,6 +262,8 @@ export async function dualAuthMiddleware(req: express.Request, res: express.Resp
   const expectedLegacyToken = process.env.ACCESS_TOKEN;
 
   if (expectedLegacyToken && (legacyToken === expectedLegacyToken || legacyToken === `Bearer ${expectedLegacyToken}`)) {
+    // Credencial de servidor: durante a transição do RS-12 vale como admin.
+    (req as any).legacyAuth = true;
     console.log(`[AUTH] path=legacy endpoint=${req.originalUrl}`);
     return next();
   }
@@ -253,6 +272,229 @@ export async function dualAuthMiddleware(req: express.Request, res: express.Resp
   console.warn(`[AUTH] path=denied ip=${req.ip || req.socket.remoteAddress} endpoint=${req.originalUrl}`);
   return res.status(401).json({ error: "Acesso não autorizado." });
 }
+
+/** Exige perfil ADMIN (allowlist). O caminho legado também é tratado como admin. */
+export function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const user = (req as any).user as DecodedIdToken | undefined;
+
+  // Caminho legado (RS-12 Fase 1): não popula req.user e é credencial de
+  // servidor, portanto tratado como admin durante a transição.
+  if (!user) {
+    if ((req as any).legacyAuth === true) return next();
+    return res.status(403).json({ error: "Acesso negado: requer conta administrativa." });
+  }
+
+  if (!isUserAllowed(user)) {
+    console.warn(`[AUTHZ] admin_negado user=${user.uid} endpoint=${req.originalUrl}`);
+    return res.status(403).json({ error: "Acesso negado: conta não autorizada." });
+  }
+
+  return next();
+}
+
+/**
+ * Executa uma consulta parametrizada na DB-API. O SQL é sempre montado no
+ * servidor; o cliente nunca envia SQL nem fragmento de SQL (RS-06).
+ */
+async function queryDbApi(sql: string, params: any[]): Promise<any[]> {
+  const dbApiUrl = process.env.DB_API_URL || "http://10.0.3.2:8000";
+  const dbApiKey = process.env.DB_API_KEY;
+  if (!dbApiKey) throw new Error("DB_API_KEY ausente no servidor.");
+
+  const response = await fetch(`${dbApiUrl}/query`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-Key": dbApiKey },
+    body: JSON.stringify({ sql, params }),
+    signal: AbortSignal.timeout(10000),
+  });
+
+  if (!response.ok) {
+    throw new Error(`DB-API respondeu ${response.status}`);
+  }
+
+  const data = await response.json();
+  return Array.isArray(data) ? data : data?.rows || data?.data || [];
+}
+
+/**
+ * Vínculo conta Google <-> corretor (RS-04).
+ *
+ * Antes, a identidade do corretor era decidida NO NAVEGADOR: a página baixava
+ * a tabela inteira de corretores e comparava nome/nascimento/CPF localmente.
+ * Isso entregava CPF e data de nascimento de todos os corretores ativos a
+ * qualquer visitante, e não ligava a conta Google ao corretor — qualquer conta
+ * podia digitar os dados de qualquer um e se passar por ele.
+ *
+ * Agora a conferência é do servidor e o resultado vira um vínculo permanente.
+ * Duas coleções, ambas negadas ao cliente e escritas só pelo Admin SDK:
+ *   user_bindings/{uid} -> { cpf, nome, email, boundAt }
+ *   corretor_bindings/{cpf} -> { uid, boundAt }
+ * A segunda existe para garantir, de forma atômica, que um corretor não seja
+ * reivindicado por duas contas Google diferentes.
+ */
+type Binding = { cpf: string; nome: string; email: string | null };
+
+async function getBinding(uid: string): Promise<Binding | null> {
+  const snap = await getFirestore().collection("user_bindings").doc(uid).get();
+  if (!snap.exists) return null;
+  const d = snap.data() || {};
+  return { cpf: d.cpf, nome: d.nome, email: d.email ?? null };
+}
+
+/** Exige que a conta autenticada esteja vinculada a um corretor ativo. */
+export async function requireBoundBroker(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const user = (req as any).user as DecodedIdToken | undefined;
+
+  if (!user) {
+    if ((req as any).legacyAuth === true) return next();
+    return res.status(401).json({ error: "Autenticação necessária." });
+  }
+
+  // Admin acessa sem precisar de vínculo.
+  if (isUserAllowed(user)) return next();
+
+  try {
+    const binding = await getBinding(user.uid);
+    if (!binding) {
+      return res.status(403).json({ error: "Conta ainda não vinculada a um corretor.", needsBinding: true });
+    }
+    (req as any).broker = binding;
+    return next();
+  } catch (err: any) {
+    console.error("[AUTHZ] Erro ao consultar vínculo:", err.message);
+    return res.status(500).json({ error: "Erro ao validar autorização." });
+  }
+}
+
+// Vincular identidade é alvo de tentativa e erro (nome + nascimento + CPF).
+// Limite estrito por IP, bem abaixo do que uma pessoa real precisa.
+const bindLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Muitas tentativas de vinculação. Aguarde alguns minutos." },
+  statusCode: 429,
+});
+
+/**
+ * GET /api/auth/me
+ * Devolve a identidade do corretor a partir do VÍNCULO no servidor.
+ * O navegador nunca decide quem é o usuário.
+ */
+app.get("/api/auth/me", dualAuthMiddleware, async (req, res) => {
+  const user = (req as any).user as DecodedIdToken | undefined;
+  if (!user) return res.status(401).json({ error: "Autenticação necessária." });
+
+  try {
+    const binding = await getBinding(user.uid);
+    return res.status(200).json({
+      isAdmin: isUserAllowed(user),
+      bound: Boolean(binding),
+      broker: binding ? { nome: binding.nome, cpf: maskCpf(binding.cpf) } : null,
+    });
+  } catch (err: any) {
+    console.error("[Auth] Erro ao consultar vínculo:", err.message);
+    return res.status(500).json({ error: "Erro ao consultar vínculo." });
+  }
+});
+
+/** Mostra apenas os 3 últimos dígitos, para o corretor se reconhecer sem expor o CPF. */
+function maskCpf(cpf: string): string {
+  const clean = String(cpf || "");
+  return clean.length >= 3 ? `***.***.**${clean.slice(-3, -2)}-${clean.slice(-2)}` : "***";
+}
+
+/**
+ * POST /api/auth/bind
+ * Primeiro acesso: confere nome + nascimento + CPF contra o MariaDB e amarra
+ * o corretor à conta Google usada. A partir daí, entrar com o Google basta.
+ *
+ * A conferência é feita AQUI, no servidor. A lista de corretores nunca sai
+ * daqui — era esse vazamento que existia antes.
+ */
+app.post("/api/auth/bind", bindLimiter, dualAuthMiddleware, async (req, res) => {
+  const user = (req as any).user as DecodedIdToken | undefined;
+  if (!user) return res.status(401).json({ error: "Faça login com o Google antes de vincular." });
+
+  const { nome, dataNascimento, cpf } = req.body || {};
+  if (!nome || !dataNascimento || !cpf) {
+    return res.status(400).json({ error: "Informe nome, data de nascimento e CPF." });
+  }
+
+  try {
+    const db = getFirestore();
+
+    // Já vinculado? Idempotente: devolve o vínculo existente.
+    const existing = await getBinding(user.uid);
+    if (existing) {
+      return res.status(200).json({ bound: true, broker: { nome: existing.nome, cpf: maskCpf(existing.cpf) } });
+    }
+
+    // Consulta os corretores ativos e confere AQUI. Mantido SELECT * porque o
+    // nome real da coluna de CPF varia na base (cpf / cpfcnpj / documento) e
+    // a normalização abaixo cobre todas — nada disso chega ao navegador.
+    const rows = await queryDbApi(
+      "SELECT * FROM corpstek_corretores WHERE administrativo_ativo = %s AND (data_exclusao IS NULL OR data_exclusao = %s)",
+      [1, "1970-01-01 00:00:01"],
+    );
+
+    const alvoNome = normalizeName(String(nome));
+    const alvoData = normalizeDate(String(dataNascimento));
+    const alvoCpf = normalizeCPF(String(cpf));
+
+    const encontrado = rows.find((row: any) => {
+      const rowNome = row.nome || row.NOME || row.nome_corretor || "";
+      const rowData = row.datanascimento || row.DATANASCIMENTO || row.data_nascimento || row.nascimento || "";
+      const rowCpf = row.cpf || row.CPF || row.cpf_cnpj || row.cpfcnpj || row.documento || "";
+      return (
+        normalizeName(String(rowNome)) === alvoNome &&
+        normalizeDate(String(rowData)) === alvoData &&
+        normalizeCPF(String(rowCpf)) === alvoCpf
+      );
+    });
+
+    if (!encontrado) {
+      console.warn(`[Auth] Vinculação negada uid=${user.uid} ip=${req.ip}`);
+      // Mensagem genérica de propósito: não revelar qual campo errou nem se o
+      // CPF existe na base.
+      return res.status(403).json({ error: "Dados não conferem com um corretor ativo." });
+    }
+
+    const nomeEncontrado = String(encontrado.nome || encontrado.NOME || encontrado.nome_corretor || "");
+
+    // Transação: um corretor não pode ser reivindicado por duas contas.
+    const corretorRef = db.collection("corretor_bindings").doc(alvoCpf);
+    const userRef = db.collection("user_bindings").doc(user.uid);
+
+    const resultado = await db.runTransaction<{ ok: boolean; erro?: string }>(async (tx) => {
+      const jaVinculado = await tx.get(corretorRef);
+      if (jaVinculado.exists && jaVinculado.data()?.uid !== user.uid) {
+        return { ok: false, erro: "Este corretor já está vinculado a outra conta Google." };
+      }
+
+      tx.set(corretorRef, { uid: user.uid, boundAt: FieldValue.serverTimestamp() });
+      tx.set(userRef, {
+        cpf: alvoCpf,
+        nome: nomeEncontrado,
+        email: user.email || null,
+        boundAt: FieldValue.serverTimestamp(),
+      });
+      return { ok: true };
+    });
+
+    if (!resultado.ok) {
+      console.warn(`[Auth] Vínculo em conflito uid=${user.uid}`);
+      return res.status(409).json({ error: resultado.erro });
+    }
+
+    console.log(`[Auth] Vínculo criado uid=${user.uid}`);
+    return res.status(200).json({ bound: true, broker: { nome: nomeEncontrado, cpf: maskCpf(alvoCpf) } });
+  } catch (err: any) {
+    console.error("[Auth] Erro na vinculação:", err.message);
+    return res.status(500).json({ error: "Erro ao validar seus dados. Tente novamente." });
+  }
+});
 
 /**
  * GET /api/access-tokens/verify-user
@@ -389,7 +631,7 @@ app.post("/api/session/logout", (req, res) => {
   return res.status(200).json({ ok: true });
 });
 
-// Security Middleware for Bitrix API proxy endpoints
+// Bitrix: autenticar e, em seguida, exigir vínculo com corretor ativo (RS-04).
 app.use("/api/bitrix", (req, res, next) => {
   if (req.path === "/debug") {
     if (process.env.NODE_ENV === "production") {
@@ -397,15 +639,18 @@ app.use("/api/bitrix", (req, res, next) => {
     }
     return next();
   }
-  return dualAuthMiddleware(req, res, next);
+  return dualAuthMiddleware(req, res, () => requireBoundBroker(req, res, next));
 });
 
 // Security Middleware for DB-API proxy endpoints
+// DB-API: expõe a base de corretores. Restrito a ADMIN — nenhum corretor
+// precisa da lista, e era exatamente esse dump que vazava CPF e data de
+// nascimento de todo mundo para o navegador (RS-06).
 app.use("/api/db", (req, res, next) => {
   if (req.path === "/health") {
     return next();
   }
-  return dualAuthMiddleware(req, res, next);
+  return dualAuthMiddleware(req, res, () => requireAdmin(req, res, next));
 });
 
 
