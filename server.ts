@@ -30,7 +30,12 @@ function initFirebaseAdmin(): App | null {
       return initializeApp();
     }
   } catch (err: any) {
-    console.warn("[Firebase Admin] Warning: SDK not fully initialized with service account key:", err.message);
+    const errorMsg = `[Firebase Admin] CRITICAL: Falha na inicialização do SDK: ${err.message}`;
+    if (process.env.NODE_ENV === "production") {
+      console.error(errorMsg);
+      throw new Error(errorMsg);
+    }
+    console.warn(errorMsg);
     return null;
   }
 }
