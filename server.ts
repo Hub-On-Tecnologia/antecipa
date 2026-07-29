@@ -15,22 +15,27 @@ function initFirebaseAdmin(): App | null {
   if (getApps().length > 0) return getApp();
 
   try {
+    let appInstance: App;
     if (process.env.FIREBASE_SERVICE_ACCOUNT) {
       const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-      return initializeApp({
+      appInstance = initializeApp({
         credential: cert(serviceAccount),
       });
     } else if (process.env.FIREBASE_SERVICE_ACCOUNT_PATH && fs.existsSync(process.env.FIREBASE_SERVICE_ACCOUNT_PATH)) {
       const serviceAccount = JSON.parse(fs.readFileSync(process.env.FIREBASE_SERVICE_ACCOUNT_PATH, "utf-8"));
-      return initializeApp({
+      appInstance = initializeApp({
         credential: cert(serviceAccount),
       });
     } else {
       // Default initialization (uses GOOGLE_APPLICATION_CREDENTIALS or default GCP metadata)
-      return initializeApp();
+      appInstance = initializeApp();
     }
+
+    // Validar as credenciais na subida via chamada leve ao Admin SDK (RS-03)
+    getAuth(appInstance).createCustomToken("probe_init_check");
+    return appInstance;
   } catch (err: any) {
-    const errorMsg = `[Firebase Admin] CRITICAL: Falha na inicialização do SDK: ${err.message}`;
+    const errorMsg = `[Firebase Admin] CRITICAL: Falha na inicialização/validação do SDK: ${err.message}`;
     if (process.env.NODE_ENV === "production") {
       console.error(errorMsg);
       throw new Error(errorMsg);
