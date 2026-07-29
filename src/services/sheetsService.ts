@@ -62,11 +62,6 @@ export async function fetchUsers(): Promise<UserData[]> {
     } catch (err) {
       console.warn('[fetchUsers] Erro ao obter ID Token do Firebase:', err);
     }
-  } else {
-    const token = import.meta.env.VITE_ACCESS_TOKEN || '';
-    if (token) {
-      headers['x-access-token'] = token;
-    }
   }
 
   const response = await fetch('/api/db/users', {

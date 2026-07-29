@@ -6,7 +6,7 @@ vi.stubGlobal('fetch', mockFetch);
 
 // Mocka import.meta.env para não depender do .env
 vi.stubGlobal('import', {
-  meta: { env: { VITE_ACCESS_TOKEN: 'test-token' } }
+  meta: { env: {} }
 });
 
 // Importa depois do mock para o módulo pegar os stubs

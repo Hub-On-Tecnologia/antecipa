@@ -118,9 +118,9 @@ export async function dualAuthMiddleware(req: express.Request, res: express.Resp
     }
   }
 
-  // 2. Fallback: Tentar validar como Token Legado (transição)
+  // 2. Fallback: Tentar validar como Token Legado (transição via ACCESS_TOKEN no servidor)
   const legacyToken = customHeader || authHeader;
-  const expectedLegacyToken = process.env.ACCESS_TOKEN || process.env.VITE_ACCESS_TOKEN;
+  const expectedLegacyToken = process.env.ACCESS_TOKEN;
 
   if (expectedLegacyToken && (legacyToken === expectedLegacyToken || legacyToken === `Bearer ${expectedLegacyToken}`)) {
     console.log(`[AUTH] path=legacy endpoint=${req.originalUrl}`);

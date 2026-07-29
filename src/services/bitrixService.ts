@@ -33,12 +33,6 @@ export async function secureBitrixFetch(endpoint: string, options: RequestInit) 
     } catch (err) {
       console.warn('[secureBitrixFetch] Erro ao renovar ID Token do Firebase:', err);
     }
-  } else {
-    // Fallback legado durante transição dual-accept
-    const token = import.meta.env.VITE_ACCESS_TOKEN || '';
-    if (token) {
-      headers['x-access-token'] = token;
-    }
   }
 
 
