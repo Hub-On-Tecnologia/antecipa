@@ -66,6 +66,44 @@ const isPlaceholderUrl = (url: string) => {
 };
 
 
+/**
+ * Dual-Accept Security Middleware (RS-12 Fase 1)
+ * Aceita requisições autenticadas via:
+ * 1. Firebase ID Token (Header "Authorization: Bearer <idToken>")
+ * 2. Token Legado (Header "x-access-token" ou "Authorization" com TOKEN)
+ *
+ * Loga a via utilizada para monitoramento da migração sem quebrar tráfego legado.
+ */
+export async function dualAuthMiddleware(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const authHeader = typeof req.headers["authorization"] === "string" ? req.headers["authorization"] : undefined;
+  const customHeader = typeof req.headers["x-access-token"] === "string" ? req.headers["x-access-token"] : undefined;
+
+  // 1. Tentar validar como Firebase ID Token
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    const candidateIdToken = authHeader.substring(7);
+    const decodedToken = await verifyFirebaseIdToken(candidateIdToken);
+
+    if (decodedToken) {
+      (req as any).user = decodedToken;
+      console.log(`[AUTH] path=jwt user=${decodedToken.email || decodedToken.uid} endpoint=${req.originalUrl}`);
+      return next();
+    }
+  }
+
+  // 2. Fallback: Tentar validar como Token Legado (transição)
+  const legacyToken = customHeader || authHeader;
+  const expectedLegacyToken = process.env.ACCESS_TOKEN || process.env.VITE_ACCESS_TOKEN;
+
+  if (expectedLegacyToken && (legacyToken === expectedLegacyToken || legacyToken === `Bearer ${expectedLegacyToken}`)) {
+    console.log(`[AUTH] path=legacy endpoint=${req.originalUrl}`);
+    return next();
+  }
+
+  // 3. Ambas as vias falharam -> 401
+  console.warn(`[AUTH] path=denied ip=${req.ip || req.socket.remoteAddress} endpoint=${req.originalUrl}`);
+  return res.status(401).json({ error: "Acesso não autorizado." });
+}
+
 // Security Middleware for Bitrix API proxy endpoints
 app.use("/api/bitrix", (req, res, next) => {
   if (req.path === "/debug") {
@@ -74,15 +112,7 @@ app.use("/api/bitrix", (req, res, next) => {
     }
     return next();
   }
-
-  const token = req.headers["x-access-token"] || req.headers["authorization"];
-  const expectedToken = process.env.ACCESS_TOKEN || process.env.VITE_ACCESS_TOKEN;
-
-  if (!expectedToken || (token !== expectedToken && token !== `Bearer ${expectedToken}`)) {
-    return res.status(401).json({ error: "Acesso não autorizado ao proxy de integração Bitrix." });
-  }
-
-  next();
+  return dualAuthMiddleware(req, res, next);
 });
 
 // Security Middleware for DB-API proxy endpoints
@@ -90,16 +120,9 @@ app.use("/api/db", (req, res, next) => {
   if (req.path === "/health") {
     return next();
   }
-
-  const token = req.headers["x-access-token"] || req.headers["authorization"];
-  const expectedToken = process.env.ACCESS_TOKEN || process.env.VITE_ACCESS_TOKEN;
-
-  if (!expectedToken || (token !== expectedToken && token !== `Bearer ${expectedToken}`)) {
-    return res.status(401).json({ error: "Acesso não autorizado ao proxy de banco de dados (DB-API)." });
-  }
-
-  next();
+  return dualAuthMiddleware(req, res, next);
 });
+
 
 // DB-API Proxy Endpoints (MariaDB via WireGuard)
 app.get("/api/db/health", async (req, res) => {
