@@ -118,7 +118,7 @@ export async function dualAuthMiddleware(req: express.Request, res: express.Resp
       }
 
       (req as any).user = decodedToken;
-      console.log(`[AUTH] path=jwt user=${decodedToken.email || decodedToken.uid} endpoint=${req.originalUrl}`);
+      console.log(`[AUTH] path=jwt user=${decodedToken.uid} endpoint=${req.originalUrl}`);
       return next();
     }
   }
