@@ -12,7 +12,13 @@ import rateLimit from "express-rate-limit";
 import cookieParser from "cookie-parser";
 // Mesmas funções usadas pelo frontend: a normalização precisa ser idêntica dos
 // dois lados, senão um corretor válido falharia na vinculação.
-import { normalizeCPF, normalizeDate, normalizeName } from "./src/lib/utils";
+import { normalizeCPF } from "./src/lib/utils";
+// Lógica de identidade/autorização vive em módulo sem efeito colateral para
+// poder ser testada sem subir o servidor.
+import {
+  isUserAllowed, maskCpf, cpfDaLinha, mapCorretor, matchCorretor, acharPorCpf,
+  isGateSessionFresh, TokenIdentidade,
+} from "./src/lib/identity";
 
 // Load environment variables
 dotenv.config();
@@ -174,13 +180,7 @@ function issueGateSession(res: express.Response): void {
  */
 function hasValidGateSession(req: express.Request): boolean {
   const issuedAt = (req as any).signedCookies?.[SESSION_COOKIE];
-  if (!issuedAt) return false;
-
-  const issuedTime = Number(issuedAt);
-  if (!Number.isFinite(issuedTime)) return false;
-
-  const age = Date.now() - issuedTime;
-  return age >= 0 && age <= SESSION_MAX_AGE_MS;
+  return isGateSessionFresh(issuedAt, Date.now(), SESSION_MAX_AGE_MS);
 }
 
 const isPlaceholderUrl = (url: string) => {
@@ -205,31 +205,6 @@ const isPlaceholderUrl = (url: string) => {
  * aplicados endpoint a endpoint. Nenhum endpoint sob /api pode ficar só com
  * dualAuthMiddleware — INV-6, negar por padrão.
  */
-
-/**
- * Valida se o usuário autenticado via Firebase consta na allowlist de ADMIN.
- */
-function isUserAllowed(decodedToken: DecodedIdToken): boolean {
-  if (decodedToken.admin === true || decodedToken.allowed === true) {
-    return true;
-  }
-
-  const allowedEnv = process.env.ALLOWED_EMAILS || process.env.ALLOWED_USERS || "";
-  if (allowedEnv) {
-    const allowedList = allowedEnv.split(",").map(item => item.trim().toLowerCase());
-    const userEmail = (decodedToken.email || "").toLowerCase();
-    const userUid = decodedToken.uid;
-
-    const emailMatches = Boolean(userEmail && decodedToken.email_verified === true && allowedList.includes(userEmail));
-    const uidMatches = Boolean(userUid && allowedList.includes(userUid));
-
-    if (emailMatches || uidMatches) {
-      return true;
-    }
-  }
-
-  return false;
-}
 
 /**
  * Dual-Accept Security Middleware (RS-12 Fase 1)
@@ -342,35 +317,6 @@ async function fetchCorretoresAtivos(): Promise<any[]> {
   );
 }
 
-/** Lê o CPF da linha cobrindo as variações de nome de coluna existentes na base. */
-function cpfDaLinha(row: any): string {
-  return String(row.cpf || row.CPF || row.cpf_cnpj || row.cpfcnpj || row.documento || "");
-}
-
-/**
- * Converte a linha do MariaDB no formato que o frontend já consome.
- * Devolve apenas os campos usados pela interface — o restante da linha não
- * precisa trafegar (RS-06, menor privilégio).
- */
-function mapCorretor(row: any) {
-  const nome = String(row.nome || row.NOME || row.nome_corretor || "");
-  const empresa = String(row.empresa || row.EMPRESA || "");
-  const cargo = String(row.cargo || row.CARGO || row.funcao || "");
-  const superintendencia = String(row.superintendencia || row.SUPERINTENDENCIA || "");
-  const loja = String(row.loja || row.LOJA || "");
-
-  return {
-    nome,
-    dataNascimento: "",              // não é mais necessário no cliente
-    cpf: maskCpf(cpfDaLinha(row)),   // mascarado: a interface só o exibe
-    empresa,
-    cargo,
-    superintendencia,
-    loja,
-    allFields: { Empresa: empresa, Cargo: cargo, "Superintendência": superintendencia, Loja: loja },
-  };
-}
-
 async function getBinding(uid: string): Promise<Binding | null> {
   const snap = await getFirestore().collection("user_bindings").doc(uid).get();
   if (!snap.exists) return null;
@@ -432,7 +378,7 @@ app.get("/api/auth/me", dualAuthMiddleware, async (req, res) => {
     // Relê o cadastro a cada acesso: corretor desativado no CRM perde o
     // acesso automaticamente, sem ninguém precisar mexer em lista nenhuma.
     const rows = await fetchCorretoresAtivos();
-    const linha = rows.find((row: any) => normalizeCPF(cpfDaLinha(row)) === binding.cpf);
+    const linha = acharPorCpf(rows, binding.cpf);
 
     if (!linha) {
       console.warn(`[Auth] Vínculo existe mas corretor não está ativo uid=${user.uid}`);
@@ -445,12 +391,6 @@ app.get("/api/auth/me", dualAuthMiddleware, async (req, res) => {
     return res.status(500).json({ error: "Erro ao consultar vínculo." });
   }
 });
-
-/** Mostra apenas os 3 últimos dígitos, para o corretor se reconhecer sem expor o CPF. */
-function maskCpf(cpf: string): string {
-  const clean = String(cpf || "");
-  return clean.length >= 3 ? `***.***.**${clean.slice(-3, -2)}-${clean.slice(-2)}` : "***";
-}
 
 /**
  * POST /api/auth/bind
@@ -477,24 +417,13 @@ app.post("/api/auth/bind", bindLimiter, dualAuthMiddleware, async (req, res) => 
     const rows = await fetchCorretoresAtivos();
 
     if (existing) {
-      const linha = rows.find((row: any) => normalizeCPF(cpfDaLinha(row)) === existing.cpf);
+      const linha = acharPorCpf(rows, existing.cpf);
       if (!linha) return res.status(403).json({ error: "Cadastro de corretor inativo.", inactive: true });
       return res.status(200).json({ bound: true, broker: mapCorretor(linha) });
     }
 
-    const alvoNome = normalizeName(String(nome));
-    const alvoData = normalizeDate(String(dataNascimento));
     const alvoCpf = normalizeCPF(String(cpf));
-
-    const encontrado = rows.find((row: any) => {
-      const rowNome = row.nome || row.NOME || row.nome_corretor || "";
-      const rowData = row.datanascimento || row.DATANASCIMENTO || row.data_nascimento || row.nascimento || "";
-      return (
-        normalizeName(String(rowNome)) === alvoNome &&
-        normalizeDate(String(rowData)) === alvoData &&
-        normalizeCPF(cpfDaLinha(row)) === alvoCpf
-      );
-    });
+    const encontrado = rows.find((row: any) => matchCorretor(row, { nome, dataNascimento, cpf }));
 
     if (!encontrado) {
       console.warn(`[Auth] Vinculação negada uid=${user.uid} ip=${req.ip}`);
