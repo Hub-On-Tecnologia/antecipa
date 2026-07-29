@@ -85,7 +85,10 @@ function isUserAllowed(decodedToken: DecodedIdToken): boolean {
     const userEmail = (decodedToken.email || "").toLowerCase();
     const userUid = decodedToken.uid;
 
-    if ((userEmail && allowedList.includes(userEmail)) || allowedList.includes(userUid)) {
+    const emailMatches = Boolean(userEmail && decodedToken.email_verified === true && allowedList.includes(userEmail));
+    const uidMatches = Boolean(userUid && allowedList.includes(userUid));
+
+    if (emailMatches || uidMatches) {
       return true;
     }
   }
