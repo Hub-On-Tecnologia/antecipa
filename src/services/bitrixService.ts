@@ -1,4 +1,5 @@
 import { Receivable, UserData } from './sheetsService';
+import { auth } from './firebaseService';
 
 export type UserAuth = UserData;
 
@@ -19,15 +20,27 @@ export function isPlaceholderUrl(url: string) {
 }
 
 export async function secureBitrixFetch(endpoint: string, options: RequestInit) {
-  const token = import.meta.env.VITE_ACCESS_TOKEN || '';
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> || {}),
   };
 
-  if (token) {
-    headers['x-access-token'] = token;
+  const user = auth.currentUser;
+  if (user) {
+    try {
+      const idToken = await user.getIdToken();
+      headers['Authorization'] = `Bearer ${idToken}`;
+    } catch (err) {
+      console.warn('[secureBitrixFetch] Erro ao renovar ID Token do Firebase:', err);
+    }
+  } else {
+    // Fallback legado durante transição dual-accept
+    const token = import.meta.env.VITE_ACCESS_TOKEN || '';
+    if (token) {
+      headers['x-access-token'] = token;
+    }
   }
+
 
   try {
     const response = await fetch(endpoint, {

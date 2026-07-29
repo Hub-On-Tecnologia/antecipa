@@ -1,7 +1,9 @@
 import { normalizeCPF, normalizeDate, normalizeName } from '../lib/utils';
+import { auth } from './firebaseService';
 
 const TAB_NAME = import.meta.env.VITE_SHEET_TAB_USUARIOS ?? 'usuários';
 const TAB_CR = import.meta.env.VITE_SHEET_TAB_CR ?? 'CR 2025';
+
 
 export interface UserData {
   nome: string;
@@ -48,15 +50,31 @@ async function fetchFromSheet(tab: string): Promise<any> {
 }
 
 export async function fetchUsers(): Promise<UserData[]> {
-  const token = import.meta.env.VITE_ACCESS_TOKEN || '';
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  const user = auth.currentUser;
+  if (user) {
+    try {
+      const idToken = await user.getIdToken();
+      headers['Authorization'] = `Bearer ${idToken}`;
+    } catch (err) {
+      console.warn('[fetchUsers] Erro ao obter ID Token do Firebase:', err);
+    }
+  } else {
+    const token = import.meta.env.VITE_ACCESS_TOKEN || '';
+    if (token) {
+      headers['x-access-token'] = token;
+    }
+  }
+
   const response = await fetch('/api/db/users', {
     method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-access-token': token,
-    },
+    headers,
     signal: AbortSignal.timeout(8000),
   });
+
 
   if (!response.ok) {
     throw new Error(`Erro ao buscar usuários no servidor: ${response.status}`);
