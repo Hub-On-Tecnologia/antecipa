@@ -113,15 +113,19 @@ registrar(
     : "ausente — a integração Bitrix ficará indisponível",
 );
 
-// --- 5. Allowlist de autorização (RS-04) ---
+// --- 5. Allowlist de ADMIN (RS-04) ---
+// Não é fatal: corretores entram pelo vínculo com o MariaDB, não por esta
+// lista. Vazia significa apenas que ninguém pode gerar token de acesso pela
+// tela administrativa nem consultar a base de corretores.
 const allowlist = process.env.ALLOWED_EMAILS || process.env.ALLOWED_USERS || "";
 const totalAllowlist = allowlist.split(",").map(s => s.trim()).filter(Boolean).length;
 registrar(
-  "Allowlist de usuários",
+  "Allowlist de ADMIN",
   totalAllowlist > 0,
   totalAllowlist > 0
-    ? `${totalAllowlist} entrada(s) — só estas contas acessam a API`
-    : "vazia — TODA conta Google receberá 403. Ninguém consegue usar o portal.",
+    ? `${totalAllowlist} conta(s) administrativa(s)`
+    : "vazia — corretores entram normalmente pelo vínculo, mas ninguém terá acesso administrativo (gerar token, consultar a base)",
+  false,
 );
 
 // --- 6. Token legado (transição do RS-12) ---
