@@ -34,11 +34,9 @@ function initFirebaseAdmin(): App | null {
       appInstance = initializeApp();
     }
 
-    // Validar as credenciais na subida via chamada leve ao Admin SDK (RS-03)
-    getAuth(appInstance).createCustomToken("probe_init_check");
     return appInstance;
   } catch (err: any) {
-    const errorMsg = `[Firebase Admin] CRITICAL: Falha na inicialização/validação do SDK: ${err.message}`;
+    const errorMsg = `[Firebase Admin] CRITICAL: Falha na inicialização do SDK: ${err.message}`;
     if (process.env.NODE_ENV === "production") {
       console.error(errorMsg);
       throw new Error(errorMsg);
@@ -49,6 +47,37 @@ function initFirebaseAdmin(): App | null {
 }
 
 const firebaseAdminApp = initFirebaseAdmin();
+
+/**
+ * Valida a credencial do Admin SDK com uma chamada real antes de servir tráfego (RS-03).
+ *
+ * initializeApp() não contata o Google — uma credencial inválida só falharia
+ * depois, dentro de verifyIdToken(), que retorna null e faz o tráfego cair
+ * silenciosamente no caminho legado (RS-12). Em produção isso precisa impedir
+ * o processo de subir, nunca degradar em silêncio (INV-8).
+ *
+ * Deve ser chamada com await: createCustomToken() é assíncrona, e uma rejeição
+ * não aguardada escapa de qualquer try/catch síncrono ao redor.
+ */
+async function assertFirebaseCredentials(): Promise<void> {
+  const isProduction = process.env.NODE_ENV === "production";
+
+  if (!firebaseAdminApp && getApps().length === 0) {
+    const msg = "[Firebase Admin] CRITICAL: SDK não inicializado — nenhuma credencial disponível.";
+    if (isProduction) throw new Error(msg);
+    console.warn(msg);
+    return;
+  }
+
+  try {
+    await getAuth().createCustomToken("probe_init_check");
+    console.log("[Firebase Admin] Credencial validada com sucesso.");
+  } catch (err: any) {
+    const msg = `[Firebase Admin] CRITICAL: credencial inválida ou sem permissão de assinatura: ${err.message}`;
+    if (isProduction) throw new Error(msg);
+    console.warn(msg);
+  }
+}
 
 /**
  * Verifica um ID Token do Firebase usando firebase-admin (RS-03).
@@ -220,14 +249,14 @@ app.post("/api/access-tokens/consume", consumeLimiter, async (req, res) => {
     const db = getFirestore();
     const docRef = db.collection("access_tokens").doc(tokenId);
 
-    let isValid = false;
-    let errorMessage = "";
-
-    await db.runTransaction(async (transaction) => {
+    // O resultado é RETORNADO pela transação, nunca escrito em estado externo.
+    // O Firestore reexecuta o callback em caso de contenção; variáveis de fora
+    // sobreviveriam à retentativa e uma tentativa anterior poderia validar um
+    // token já consumido por outra requisição (uso duplo).
+    const result = await db.runTransaction<{ valid: boolean; error: string }>(async (transaction) => {
       const docSnap = await transaction.get(docRef);
       if (!docSnap.exists) {
-        errorMessage = "Token inválido ou inexistente.";
-        return;
+        return { valid: false, error: "Token inválido ou inexistente." };
       }
 
       const data = docSnap.data();
@@ -237,8 +266,7 @@ app.post("/api/access-tokens/consume", consumeLimiter, async (req, res) => {
       transaction.delete(docRef);
 
       if (!createdAt) {
-        errorMessage = "Token inválido sem data de criação.";
-        return;
+        return { valid: false, error: "Token inválido sem data de criação." };
       }
 
       let createdTime = Date.now();
@@ -252,23 +280,21 @@ app.post("/api/access-tokens/consume", consumeLimiter, async (req, res) => {
         createdTime = createdAt.getTime();
       }
 
-      const now = Date.now();
-      const diff = now - createdTime;
+      const diff = Date.now() - createdTime;
 
       // Janela de 1 minuto (60000ms) com 5s de tolerância para relógios dessincronizados
       if (diff >= -5000 && diff <= 60000) {
-        isValid = true;
-      } else {
-        errorMessage = "Token de acesso expirado.";
+        return { valid: true, error: "" };
       }
+      return { valid: false, error: "Token de acesso expirado." };
     });
 
-    if (isValid) {
+    if (result.valid) {
       console.log(`[AccessTokens] Token consumido com sucesso (atômico): ${tokenId}`);
       return res.status(200).json({ valid: true });
     } else {
-      console.warn(`[AccessTokens] Falha ao consumir token ${tokenId}: ${errorMessage}`);
-      return res.status(401).json({ valid: false, error: errorMessage || "Token inválido ou inexistente." });
+      console.warn(`[AccessTokens] Falha ao consumir token ${tokenId}: ${result.error}`);
+      return res.status(401).json({ valid: false, error: result.error || "Token inválido ou inexistente." });
     }
   } catch (err: any) {
     console.error("[AccessTokens] Erro atômico no consumo de token:", err);
@@ -540,6 +566,10 @@ app.post("/api/bitrix/update", async (req, res) => {
 
 // Vite middleware for development / serving static files for production
 async function setupVite() {
+  // Falha ruidosa ANTES de aceitar tráfego: com credencial inválida o servidor
+  // não deve subir em produção (RS-03 / INV-8).
+  await assertFirebaseCredentials();
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -561,5 +591,8 @@ async function setupVite() {
 }
 
 setupVite().catch((err) => {
-  console.error("Failed to start Vite dev server:", err);
+  console.error("[Server] Falha fatal na inicialização:", err);
+  // Encerra com código de erro para o PM2 registrar a falha em vez de
+  // deixar um processo vivo sem listener.
+  process.exit(1);
 });
