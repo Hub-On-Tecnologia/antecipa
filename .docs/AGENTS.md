@@ -42,6 +42,7 @@
 5. Ser consciente do gasto de tokens — preferir leituras cirúrgicas a leituras amplas
 6. Quando em dúvida sobre regra de negócio → **perguntar, não presumir**
 7. Registrar decisões técnicas relevantes no `DECISIONS.md` ao final de cada sessão
+8. **REGRA RÍGIDA DE EXECUÇÃO DE SEGURANÇA**: Implementar **ESTRITAMENTE 1 PASSO POR VEZ**, realizar testes unitários/verificações, fazer commit no Git, atualizar a VPS e aguardar aprovação explícita antes de iniciar o próximo passo. Proibido fazer múltiplos passos na mesma iteração.
 
 ### Protocolo de task (obrigatório antes de qualquer implementação):
 ```

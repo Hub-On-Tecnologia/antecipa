@@ -3,8 +3,57 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 
+import fs from "fs";
+import { initializeApp, cert, getApps, getApp, App } from "firebase-admin/app";
+import { getAuth, DecodedIdToken } from "firebase-admin/auth";
+
 // Load environment variables
 dotenv.config();
+
+// Initialize Firebase Admin SDK for server-side JWT verification (RS-03)
+function initFirebaseAdmin(): App | null {
+  if (getApps().length > 0) return getApp();
+
+  try {
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+      return initializeApp({
+        credential: cert(serviceAccount),
+      });
+    } else if (process.env.FIREBASE_SERVICE_ACCOUNT_PATH && fs.existsSync(process.env.FIREBASE_SERVICE_ACCOUNT_PATH)) {
+      const serviceAccount = JSON.parse(fs.readFileSync(process.env.FIREBASE_SERVICE_ACCOUNT_PATH, "utf-8"));
+      return initializeApp({
+        credential: cert(serviceAccount),
+      });
+    } else {
+      // Default initialization (uses GOOGLE_APPLICATION_CREDENTIALS or default GCP metadata)
+      return initializeApp();
+    }
+  } catch (err: any) {
+    console.warn("[Firebase Admin] Warning: SDK not fully initialized with service account key:", err.message);
+    return null;
+  }
+}
+
+const firebaseAdminApp = initFirebaseAdmin();
+
+/**
+ * Verifica um ID Token do Firebase usando firebase-admin (RS-03).
+ * Retorna o token decodificado ou null se inválido/inexistente.
+ */
+export async function verifyFirebaseIdToken(idToken: string): Promise<DecodedIdToken | null> {
+  if (!firebaseAdminApp && getApps().length === 0) {
+    return null;
+  }
+  try {
+    const auth = getAuth();
+    const decodedToken = await auth.verifyIdToken(idToken);
+    return decodedToken;
+  } catch (error) {
+    return null;
+  }
+}
+
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
@@ -15,6 +64,7 @@ app.use(express.json({ limit: "50mb" }));
 const isPlaceholderUrl = (url: string) => {
   return !url || url.includes("seu-dominio") || url.includes("USER_ID") || url.includes("TOKEN");
 };
+
 
 // Security Middleware for Bitrix API proxy endpoints
 app.use("/api/bitrix", (req, res, next) => {

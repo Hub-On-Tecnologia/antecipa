@@ -6,6 +6,25 @@
 
 ---
 
+## DEC-014 — 2026-07-29 | Regra de Execução Estrita de 1 Passo por Vez para a Implementação do Security PRD
+
+**Solicitado por:** Pedro (Dono do Projeto)  
+**Decidido por:** Pedro + Orquestrador
+
+**Contexto:**  
+A implementação das melhorias de segurança (PRD-SEC-001) envolve autenticação, Firestore, middlewares e endpoints de produção em uma aplicação financeira de comissões. Qualquer falha em lote ou corte abrupto (big-bang) pode derrubar a aplicação em produção.
+
+**Decisão:**  
+1. A execução do Security PRD será feita **estritamente de 1 em 1 passo por vez**.
+2. Após a conclusão de cada passo:
+   - Escrever e executar testes unitários/integrados do passo.
+   - Realizar o commit no Git com mensagem descritiva.
+   - Atualizar a VPS e verificar a integridade da aplicação em produção.
+   - Aguardar aprovação explícita do Pedro antes de iniciar o próximo passo.
+3. Proibido agrupar múltiplos passos em uma mesma iteração.
+
+---
+
 ## DEC-013 — 2026-07-28 | Estratégia de Build Local na VPS e Pós-Mortem de CI/CD
 
 **Solicitado por:** Pedro (Dono do Projeto)  
