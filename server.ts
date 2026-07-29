@@ -67,9 +67,31 @@ const isPlaceholderUrl = (url: string) => {
 
 
 /**
+ * Valida se o usuário autenticado via Firebase consta na allowlist de autorização (RS-04).
+ */
+function isUserAllowed(decodedToken: DecodedIdToken): boolean {
+  if (decodedToken.admin === true || decodedToken.allowed === true) {
+    return true;
+  }
+
+  const allowedEnv = process.env.ALLOWED_EMAILS || process.env.ALLOWED_USERS || "";
+  if (allowedEnv) {
+    const allowedList = allowedEnv.split(",").map(item => item.trim().toLowerCase());
+    const userEmail = (decodedToken.email || "").toLowerCase();
+    const userUid = decodedToken.uid;
+
+    if ((userEmail && allowedList.includes(userEmail)) || allowedList.includes(userUid)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * Dual-Accept Security Middleware (RS-12 Fase 1)
  * Aceita requisições autenticadas via:
- * 1. Firebase ID Token (Header "Authorization: Bearer <idToken>")
+ * 1. Firebase ID Token (Header "Authorization: Bearer <idToken>") com verificação de Allowlist (RS-04)
  * 2. Token Legado (Header "x-access-token" ou "Authorization" com TOKEN)
  *
  * Loga a via utilizada para monitoramento da migração sem quebrar tráfego legado.
@@ -84,6 +106,12 @@ export async function dualAuthMiddleware(req: express.Request, res: express.Resp
     const decodedToken = await verifyFirebaseIdToken(candidateIdToken);
 
     if (decodedToken) {
+      // RS-04: Exigir allowlist além da autenticação. Conta fora da allowlist -> 403
+      if (!isUserAllowed(decodedToken)) {
+        console.warn(`[AUTH] path=forbidden user=${decodedToken.uid} endpoint=${req.originalUrl}`);
+        return res.status(403).json({ error: "Acesso negado: Conta não autorizada na allowlist." });
+      }
+
       (req as any).user = decodedToken;
       console.log(`[AUTH] path=jwt user=${decodedToken.email || decodedToken.uid} endpoint=${req.originalUrl}`);
       return next();
