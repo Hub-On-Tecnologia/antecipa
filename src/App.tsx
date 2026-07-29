@@ -51,42 +51,64 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Validação do portão via consumo no servidor (POST /api/access-tokens/consume)
+  // Portão de acesso: sessão existente primeiro, token de uso único depois (RS-08).
+  // Quem decide é sempre o servidor — o cookie de sessão é httpOnly e assinado,
+  // então o cliente não consegue ler nem forjar.
   useEffect(() => {
-    async function validateToken() {
+    let cancelled = false;
+
+    async function openGate() {
       if (isAccessAllowed) return;
-
-      const params = new URLSearchParams(window.location.search);
-      const token = params.get('token') || params.get('ref') || params.get('src');
-
-      if (!token) return;
 
       setIsValidatingToken(true);
       try {
+        // 1. Já existe sessão válida? É isto que faz recarregar a WebView
+        //    (ou voltar para o app) não derrubar o usuário.
+        const sessionRes = await fetch('/api/session', { credentials: 'same-origin' });
+        if (sessionRes.ok) {
+          const session = await sessionRes.json();
+          if (session.valid) {
+            if (!cancelled) setIsAccessAllowed(true);
+            return;
+          }
+        }
+
+        // 2. Sem sessão: exige o token de uso único vindo do app.
+        const params = new URLSearchParams(window.location.search);
+        const token = params.get('token') || params.get('ref') || params.get('src');
+        if (!token) return;
+
         const response = await fetch('/api/access-tokens/consume', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
           body: JSON.stringify({ tokenId: token }),
         });
 
         if (response.ok) {
           const data = await response.json();
           if (data.valid) {
-            setIsAccessAllowed(true);
-          } else {
-            console.warn('Token de acesso inválido ou expirado:', data.error);
+            if (!cancelled) setIsAccessAllowed(true);
+            // O token já foi consumido: tira da barra de endereços para não
+            // ficar no histórico do navegador nem vazar via header Referer.
+            window.history.replaceState({}, document.title, window.location.pathname);
+            return;
           }
+          console.warn('Token de acesso inválido ou expirado:', data.error);
         } else {
           console.warn('Falha na validação do token (HTTP status):', response.status);
         }
       } catch (err) {
-        console.error('Erro na validação do token de acesso via servidor:', err);
+        console.error('Erro ao abrir o portão de acesso:', err);
       } finally {
-        setIsValidatingToken(false);
+        if (!cancelled) setIsValidatingToken(false);
       }
     }
 
-    validateToken();
+    openGate();
+    return () => {
+      cancelled = true;
+    };
   }, [isAccessAllowed]);
 
   // Check de UX para verificar se o usuário Firebase atual está na allowlist antes de mostrar a UI do gerador
