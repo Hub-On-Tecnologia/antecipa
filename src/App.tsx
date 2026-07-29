@@ -38,24 +38,7 @@ export default function App() {
     return path === '/tutorial-integracao' || path === '/tutorial' || path === '/docs' || window.location.hash === '#/tutorial';
   });
 
-  const [isAccessAllowed, setIsAccessAllowed] = useState<boolean>(() => {
-    const envToken = import.meta.env.VITE_ACCESS_TOKEN;
-    
-    // Se a variável não estiver definida, o portão deve estar ABERTO
-    if (!envToken) {
-      return true;
-    }
-
-    const referrer = document.referrer?.toLowerCase() || '';
-    const hasValidReferrer = referrer.includes('bitrix') || referrer.includes('crm') || referrer.includes('antecipabroker') || referrer.includes('meuapp') || referrer.includes('app-empresa');
-    const hasSessionAllowed = sessionStorage.getItem('portal_access_allowed') === 'true';
-    
-    if (hasValidReferrer || hasSessionAllowed) {
-      sessionStorage.setItem('portal_access_allowed', 'true');
-      return true;
-    }
-    return false;
-  });
+  const [isAccessAllowed, setIsAccessAllowed] = useState<boolean>(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -71,13 +54,6 @@ export default function App() {
 
       const params = new URLSearchParams(window.location.search);
       const token = params.get('token') || params.get('ref') || params.get('src');
-      
-      const envToken = import.meta.env.VITE_ACCESS_TOKEN;
-      if (token && envToken && token === envToken) {
-        setIsAccessAllowed(true);
-        sessionStorage.setItem('portal_access_allowed', 'true');
-        return;
-      }
 
       if (!token) return;
 
@@ -108,7 +84,6 @@ export default function App() {
             // Aceita se o token foi criado a menos de 1 minuto (60000ms), com tolerância de 5s para relógios dessincronizados
             if (diff >= -5000 && diff <= 60000) {
               setIsAccessAllowed(true);
-              sessionStorage.setItem('portal_access_allowed', 'true');
               
               // Deleta o token para garantir o uso único
               try {
