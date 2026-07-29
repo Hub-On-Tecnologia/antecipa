@@ -298,5 +298,14 @@ Tema escuro elegante com:
 
 ---
 
+## DEC-014 — Rotação da chave SSH adiada
+
+A chave privada `github-actions` foi commitada em 4c3cee3 e está no histórico do repositório remoto. Decisão: não rotacionar durante o desenvolvimento (aplicação interna, sem dados reais).
+GATILHO OBRIGATÓRIO: rotacionar antes do primeiro deploy de produção.
+Passos: remover a chave pública de /root/.ssh/authorized_keys no VPS, gerar novo par, atualizar o GitHub Secret VPS_SSH_KEY.
+O .gitignore corrigido na Tarefa 1 previne novos commits, mas NÃO remove a chave do histórico já publicado.
+
+---
+
 *Arquivo mantido pelo: Gestor de Projeto*
 *Orquestrador deve registrar aqui ao final de sessões com decisões relevantes*
