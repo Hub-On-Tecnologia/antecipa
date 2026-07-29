@@ -413,7 +413,7 @@ function gerarLinkAcesso() {
               "text-xs leading-relaxed mb-4",
               theme === 'dark' ? "text-white/50" : "text-slate-500"
             )}>
-              Para que esta validação funcione de forma totalmente segura no lado do cliente sem expor chaves mestras, as regras de segurança do seu Firestore (<code>firestore.rules</code>) devem autorizar a leitura e criação de tokens pelo ID correspondente:
+              Para segurança máxima e conformidade, o cliente web não possui nenhuma permissão direta sobre a coleção <code>access_tokens</code>. As regras de segurança do seu Firestore (<code>firestore.rules</code>) negam todo o acesso do cliente, pois o ciclo de vida é gerenciado exclusivamente via servidor / Firebase Admin SDK ou endpoint <code>POST /api/access-tokens</code>:
             </p>
 
             <pre className={cn(
@@ -421,8 +421,8 @@ function gerarLinkAcesso() {
               theme === 'dark' ? "bg-black/40 text-emerald-400/80 border border-white/5" : "bg-slate-50 text-emerald-700 border border-slate-100"
             )}>
 {`match /access_tokens/{tokenId} {
-  // Permite ler, criar e deletar tokens de acesso temporários baseados no ID gerado
-  allow get, create, delete: if tokenId is string && tokenId.size() <= 128;
+  // Nega todo o acesso direto do cliente (Admin SDK ignora as regras no servidor)
+  allow get, list, create, update, delete: if false;
 }`}
             </pre>
           </div>

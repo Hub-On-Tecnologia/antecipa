@@ -13,8 +13,7 @@ import TutorialPage from './components/TutorialPage';
 import QAPanel from './components/QAPanel';
 import { UserAuth } from './services/bitrixService';
 import { cn } from './lib/utils';
-import { auth, onAuthStateChanged, signInWithGoogle, User, db } from './services/firebaseService';
-import { doc, getDoc, deleteDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { auth, onAuthStateChanged, signInWithGoogle, User } from './services/firebaseService';
 
 export default function App() {
   const [userAuthData, setUserAuthData] = useState<UserAuth | null>(null);
@@ -40,6 +39,10 @@ export default function App() {
 
   const [isAccessAllowed, setIsAccessAllowed] = useState<boolean>(false);
 
+  // Check de UX para exibir/bloquear a interface do gerador
+  const [isCheckingAllowlist, setIsCheckingAllowlist] = useState<boolean>(false);
+  const [isAllowlistApproved, setIsAllowlistApproved] = useState<boolean | null>(null);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setFirebaseUser(user);
@@ -48,6 +51,7 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // Validação do portão via consumo no servidor (POST /api/access-tokens/consume)
   useEffect(() => {
     async function validateToken() {
       if (isAccessAllowed) return;
@@ -59,47 +63,24 @@ export default function App() {
 
       setIsValidatingToken(true);
       try {
-        const tokenRef = doc(db, 'access_tokens', token);
-        const tokenSnap = await getDoc(tokenRef);
+        const response = await fetch('/api/access-tokens/consume', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tokenId: token }),
+        });
 
-        if (tokenSnap.exists()) {
-          const data = tokenSnap.data();
-          const createdAt = data.createdAt;
-
-          if (createdAt) {
-            let createdTime = Date.now();
-            if (typeof createdAt.toMillis === 'function') {
-              createdTime = createdAt.toMillis();
-            } else if (createdAt.seconds) {
-              createdTime = createdAt.seconds * 1000;
-            } else if (typeof createdAt === 'number') {
-              createdTime = createdAt;
-            } else if (createdAt instanceof Date) {
-              createdTime = createdAt.getTime();
-            }
-
-            const now = Date.now();
-            const diff = now - createdTime;
-
-            // Aceita se o token foi criado a menos de 1 minuto (60000ms), com tolerância de 5s para relógios dessincronizados
-            if (diff >= -5000 && diff <= 60000) {
-              setIsAccessAllowed(true);
-              
-              // Deleta o token para garantir o uso único
-              try {
-                await deleteDoc(tokenRef);
-              } catch (delErr) {
-                console.warn('Erro ao deletar token de acesso utilizado:', delErr);
-              }
-            } else {
-              console.warn('Token de acesso expirado. Tempo decorrido:', Math.round(diff / 1000), 'segundos.');
-            }
+        if (response.ok) {
+          const data = await response.json();
+          if (data.valid) {
+            setIsAccessAllowed(true);
+          } else {
+            console.warn('Token de acesso inválido ou expirado:', data.error);
           }
         } else {
-          console.warn('Token de acesso não encontrado no banco ou já utilizado.');
+          console.warn('Falha na validação do token (HTTP status):', response.status);
         }
       } catch (err) {
-        console.error('Erro na validação do token de acesso expirável:', err);
+        console.error('Erro na validação do token de acesso via servidor:', err);
       } finally {
         setIsValidatingToken(false);
       }
@@ -107,6 +88,37 @@ export default function App() {
 
     validateToken();
   }, [isAccessAllowed]);
+
+  // Check de UX para verificar se o usuário Firebase atual está na allowlist antes de mostrar a UI do gerador
+  useEffect(() => {
+    async function checkUserAllowlist() {
+      if (!firebaseUser || !isGeneratorMode || isAccessAllowed) {
+        setIsAllowlistApproved(null);
+        return;
+      }
+      setIsCheckingAllowlist(true);
+      try {
+        const idToken = await firebaseUser.getIdToken();
+        // Este check é UX, não segurança. A fronteira real é a allowlist em POST /api/access-tokens. Nunca confiar apenas neste retorno.
+        const res = await fetch('/api/access-tokens/verify-user', {
+          headers: { Authorization: `Bearer ${idToken}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setIsAllowlistApproved(data.allowed === true);
+        } else {
+          setIsAllowlistApproved(false);
+        }
+      } catch (err) {
+        console.error('Erro ao verificar allowlist para UX:', err);
+        setIsAllowlistApproved(false);
+      } finally {
+        setIsCheckingAllowlist(false);
+      }
+    }
+
+    checkUserAllowlist();
+  }, [firebaseUser, isGeneratorMode, isAccessAllowed]);
 
   const toggleTheme = () => {
     const newTheme = theme === 'dark' ? 'light' : 'dark';
@@ -131,24 +143,37 @@ export default function App() {
     }
   };
 
+  // Emissão de token no servidor via POST /api/access-tokens
   const handleGenerateAndRedirect = async () => {
+    if (!firebaseUser) {
+      alert('Sessão expirada. Faça login com o Google primeiro.');
+      return;
+    }
     setIsGeneratingToken(true);
     try {
-      // Gera um token aleatório criptograficamente seguro para testes
-      const uuid = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : Math.random().toString(36).substring(2, 15);
-      const tokenId = `token_${uuid.slice(0, 16)}`;
-
-      // Adiciona o token no Firestore com data atual
-      const tokenRef = doc(db, 'access_tokens', tokenId);
-      await setDoc(tokenRef, {
-        createdAt: serverTimestamp()
+      const idToken = await firebaseUser.getIdToken();
+      const res = await fetch('/api/access-tokens', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
+        },
       });
 
-      // Redireciona para a raiz do site passando o token gerado por query param
-      window.location.href = `${window.location.origin}/?token=${tokenId}`;
-    } catch (err) {
-      console.error('Erro ao gerar token de teste:', err);
-      alert('Erro ao registrar o token no Firebase. Certifique-se de que o Firestore está ativo.');
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Erro HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      if (data.tokenId) {
+        window.location.href = `${window.location.origin}/?token=${data.tokenId}`;
+      } else {
+        throw new Error('Servidor não retornou tokenId.');
+      }
+    } catch (err: any) {
+      console.error('Erro ao gerar token via servidor:', err);
+      alert(`Erro ao gerar token: ${err.message || 'Falha na comunicação com o servidor.'}`);
     } finally {
       setIsGeneratingToken(false);
     }
@@ -207,113 +232,195 @@ export default function App() {
                 : "bg-white border-slate-200"
             )}
           >
-            {/* Top glowing QA Icon */}
-            <div className="flex justify-center mb-6">
-              <div className={cn(
-                "p-4 rounded-full relative flex items-center justify-center transition-colors",
-                theme === 'dark' ? "bg-emerald-500/10 text-emerald-500" : "bg-emerald-50 text-emerald-500"
-              )}>
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500/20 opacity-75"></span>
-                <Sparkles size={32} strokeWidth={1.5} />
+            {/* Se o usuário NÃO estiver logado no Firebase, exibe Login obrigatório primeiro (DoD) */}
+            {!firebaseUser ? (
+              <div className="space-y-6">
+                <div className="flex justify-center mb-2">
+                  <div className={cn(
+                    "p-4 rounded-full relative flex items-center justify-center transition-colors",
+                    theme === 'dark' ? "bg-amber-500/10 text-amber-500" : "bg-amber-50 text-amber-500"
+                  )}>
+                    <Lock size={32} strokeWidth={1.5} />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <span className="text-[9px] uppercase tracking-[0.4em] font-bold text-amber-500 block">
+                    AUTENTICAÇÃO NECESSÁRIA
+                  </span>
+                  <h1 className="text-2xl font-light uppercase tracking-tight">
+                    Login de <span className="font-semibold">Gerador</span>
+                  </h1>
+                  <p className={cn(
+                    "text-xs leading-relaxed max-w-md mx-auto",
+                    theme === 'dark' ? "text-white/55" : "text-slate-500"
+                  )}>
+                    Você deve fazer login com sua conta Google corporativa autorizada antes de gerar tokens de acesso.
+                  </p>
+                </div>
+                <button
+                  onClick={handleGoogleSignIn}
+                  className="w-full py-5 font-bold uppercase tracking-[0.2em] text-[11px] bg-white text-black hover:bg-white/90 transition-all flex items-center justify-center gap-3 rounded-sm shadow-lg"
+                >
+                  <LogIn size={16} />
+                  <span>Login com Google</span>
+                </button>
               </div>
-            </div>
-
-            <div className="space-y-3 mb-6">
-              <span className={cn(
-                "text-[9px] uppercase tracking-[0.4em] font-bold block",
-                theme === 'dark' ? "text-emerald-400" : "text-emerald-500"
-              )}>
-                MÓDULO DE INTEGRAÇÃO • SIMULADOR
-              </span>
-              <h1 className="text-2xl font-light uppercase tracking-tight">
-                Gerador de <span className="font-semibold">Link de Acesso</span>
-              </h1>
-              <p className={cn(
-                "text-xs leading-relaxed max-w-md mx-auto",
-                theme === 'dark' ? "text-white/55" : "text-slate-500"
-              )}>
-                Gere chaves de acesso temporárias de uso único para simular a abertura segura do portal a partir de sistemas integrados (ex: CRM, Bitrix24, ERP).
-              </p>
-            </div>
-
-            {/* Steps & Instructions */}
-            <div className={cn(
-              "border-t border-b py-6 my-6 space-y-4 text-left text-xs",
-              theme === 'dark' ? "border-white/5" : "border-slate-100"
-            )}>
-              <h3 className="font-semibold uppercase tracking-wider text-[10px] opacity-75">Como funciona o fluxo de produção:</h3>
-              <ul className="space-y-3">
-                <li className="flex gap-3">
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500 text-[10px] font-bold shrink-0">1</span>
-                  <span className={theme === 'dark' ? "text-white/70" : "text-slate-600"}>
-                    Ao clicar no botão, o sistema simula a criação de uma chave temporária segura gravada em nosso banco de dados.
+            ) : isCheckingAllowlist ? (
+              <div className="py-12 space-y-4">
+                <Loader2 className="animate-spin mx-auto text-emerald-500" size={32} />
+                <span className="text-[10px] uppercase tracking-[0.3em] font-bold text-white/50 block">
+                  Verificando Permissões...
+                </span>
+              </div>
+            ) : isAllowlistApproved === false ? (
+              <div className="space-y-6">
+                <div className="flex justify-center mb-2">
+                  <div className={cn(
+                    "p-4 rounded-full relative flex items-center justify-center transition-colors",
+                    theme === 'dark' ? "bg-rose-500/10 text-rose-500" : "bg-rose-50 text-rose-500"
+                  )}>
+                    <ShieldAlert size={32} strokeWidth={1.5} />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <span className="text-[9px] uppercase tracking-[0.4em] font-bold text-rose-500 block">
+                    ACESSO NEGADO • ALLOWLIST
                   </span>
-                </li>
-                <li className="flex gap-3">
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500 text-[10px] font-bold shrink-0">2</span>
-                  <span className={theme === 'dark' ? "text-white/70" : "text-slate-600"}>
-                    O sistema redireciona você para a raiz da aplicação com a query param <code>?token=...</code>. O portal valida essa chave e a <strong>deleta do banco de dados imediatamente</strong>.
+                  <h1 className="text-2xl font-light uppercase tracking-tight">
+                    Conta não <span className="font-semibold">Autorizada</span>
+                  </h1>
+                  <p className={cn(
+                    "text-xs leading-relaxed max-w-md mx-auto",
+                    theme === 'dark' ? "text-white/55" : "text-slate-500"
+                  )}>
+                    A conta <strong>{firebaseUser.email}</strong> não consta na lista de usuários autorizados a gerar tokens de acesso ao portal.
+                  </p>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className={cn(
+                    "w-full py-3 border text-[10px] uppercase tracking-[0.15em] transition-all flex items-center justify-center gap-2 rounded-sm",
+                    theme === 'dark'
+                      ? "border-white/10 text-white/50 hover:bg-white/5 hover:text-white"
+                      : "border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+                  )}
+                >
+                  <LogOut size={12} />
+                  <span>Desconectar e Trocar de Conta</span>
+                </button>
+              </div>
+            ) : (
+              /* Usuário autenticado e aprovado na allowlist: exibe a interface do Gerador */
+              <>
+                {/* Top glowing QA Icon */}
+                <div className="flex justify-center mb-6">
+                  <div className={cn(
+                    "p-4 rounded-full relative flex items-center justify-center transition-colors",
+                    theme === 'dark' ? "bg-emerald-500/10 text-emerald-500" : "bg-emerald-50 text-emerald-500"
+                  )}>
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500/20 opacity-75"></span>
+                    <Sparkles size={32} strokeWidth={1.5} />
+                  </div>
+                </div>
+
+                <div className="space-y-3 mb-6">
+                  <span className={cn(
+                    "text-[9px] uppercase tracking-[0.4em] font-bold block",
+                    theme === 'dark' ? "text-emerald-400" : "text-emerald-500"
+                  )}>
+                    MÓDULO DE INTEGRAÇÃO • SIMULADOR
                   </span>
-                </li>
-                <li className="flex gap-3">
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500 text-[10px] font-bold shrink-0">3</span>
-                  <span className={theme === 'dark' ? "text-white/70" : "text-slate-600"}>
-                    A chave expira em <strong>1 minuto</strong>. Se tentar atualizar a página com o token na URL ou usar o mesmo link novamente, o acesso será negado para total segurança.
-                  </span>
-                </li>
-              </ul>
-            </div>
+                  <h1 className="text-2xl font-light uppercase tracking-tight">
+                    Gerador de <span className="font-semibold">Link de Acesso</span>
+                  </h1>
+                  <p className={cn(
+                    "text-xs leading-relaxed max-w-md mx-auto",
+                    theme === 'dark' ? "text-white/55" : "text-slate-500"
+                  )}>
+                    Gere chaves de acesso temporárias de uso único para simular a abertura segura do portal a partir de sistemas integrados (ex: CRM, Bitrix24, ERP).
+                  </p>
+                </div>
 
-            {/* Action Buttons */}
-            <div className="space-y-4">
-              <button
-                onClick={handleGenerateAndRedirect}
-                disabled={isGeneratingToken}
-                className={cn(
-                  "w-full py-5 font-bold uppercase tracking-[0.2em] text-[11px] transition-all flex items-center justify-center gap-3 rounded-sm",
-                  isGeneratingToken
-                    ? "bg-white/10 text-white/40 cursor-not-allowed"
-                    : theme === 'dark'
-                      ? "bg-white text-black hover:bg-white/90 active:scale-[0.99] shadow-lg"
-                      : "bg-[#0A0A0A] text-white hover:bg-black/90 active:scale-[0.99] shadow-md"
-                )}
-              >
-                {isGeneratingToken ? (
-                  <>
-                    <Loader2 className="animate-spin" size={16} />
-                    <span>Gerando Chave Segura...</span>
-                  </>
-                ) : (
-                  <>
-                    <Key size={16} />
-                    <span>Gerar Código & Acessar Portal</span>
-                  </>
-                )}
-              </button>
+                {/* Steps & Instructions */}
+                <div className={cn(
+                  "border-t border-b py-6 my-6 space-y-4 text-left text-xs",
+                  theme === 'dark' ? "border-white/5" : "border-slate-100"
+                )}>
+                  <h3 className="font-semibold uppercase tracking-wider text-[10px] opacity-75">Como funciona o fluxo de produção:</h3>
+                  <ul className="space-y-3">
+                    <li className="flex gap-3">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500 text-[10px] font-bold shrink-0">1</span>
+                      <span className={theme === 'dark' ? "text-white/70" : "text-slate-600"}>
+                        Ao clicar no botão, o servidor gera uma chave temporária segura com fonte criptográfica.
+                      </span>
+                    </li>
+                    <li className="flex gap-3">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500 text-[10px] font-bold shrink-0">2</span>
+                      <span className={theme === 'dark' ? "text-white/70" : "text-slate-600"}>
+                        O sistema redireciona para a raiz com a query param <code>?token=...</code>. O portal valida no servidor e a <strong>deleta do banco de dados imediatamente</strong>.
+                      </span>
+                    </li>
+                    <li className="flex gap-3">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500 text-[10px] font-bold shrink-0">3</span>
+                      <span className={theme === 'dark' ? "text-white/70" : "text-slate-600"}>
+                        A chave expira em <strong>1 minuto</strong>. Se tentar reutilizar o mesmo link, o acesso será negado.
+                      </span>
+                    </li>
+                  </ul>
+                </div>
 
-              <button
-                onClick={() => {
-                  sessionStorage.clear();
-                  window.location.href = window.location.origin;
-                }}
-                className={cn(
-                  "w-full py-3 border text-[10px] uppercase tracking-[0.15em] transition-all flex items-center justify-center gap-2 rounded-sm",
-                  theme === 'dark'
-                    ? "border-white/10 text-white/50 hover:bg-white/5 hover:text-white"
-                    : "border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-800"
-                )}
-              >
-                <RefreshCw size={12} />
-                <span>Limpar Sessão Ativa / Bloquear Acesso</span>
-              </button>
-            </div>
+                {/* Action Buttons */}
+                <div className="space-y-4">
+                  <button
+                    onClick={handleGenerateAndRedirect}
+                    disabled={isGeneratingToken}
+                    className={cn(
+                      "w-full py-5 font-bold uppercase tracking-[0.2em] text-[11px] transition-all flex items-center justify-center gap-3 rounded-sm",
+                      isGeneratingToken
+                        ? "bg-white/10 text-white/40 cursor-not-allowed"
+                        : theme === 'dark'
+                          ? "bg-white text-black hover:bg-white/90 active:scale-[0.99] shadow-lg"
+                          : "bg-[#0A0A0A] text-white hover:bg-black/90 active:scale-[0.99] shadow-md"
+                    )}
+                  >
+                    {isGeneratingToken ? (
+                      <>
+                        <Loader2 className="animate-spin" size={16} />
+                        <span>Gerando Chave Segura no Servidor...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Key size={16} />
+                        <span>Gerar Código & Acessar Portal</span>
+                      </>
+                    )}
+                  </button>
 
-            <div className={cn(
-              "pt-6 border-t text-[9px] uppercase tracking-wider text-center font-semibold mt-6 opacity-30",
-              theme === 'dark' ? "border-white/5 text-white/80" : "border-slate-100 text-slate-700"
-            )}>
-              <span>Módulo de Integração • Firebase Firestore</span>
-            </div>
+                  <button
+                    onClick={() => {
+                      sessionStorage.clear();
+                      window.location.href = window.location.origin;
+                    }}
+                    className={cn(
+                      "w-full py-3 border text-[10px] uppercase tracking-[0.15em] transition-all flex items-center justify-center gap-2 rounded-sm",
+                      theme === 'dark'
+                        ? "border-white/10 text-white/50 hover:bg-white/5 hover:text-white"
+                        : "border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+                    )}
+                  >
+                    <RefreshCw size={12} />
+                    <span>Limpar Sessão Ativa / Bloquear Acesso</span>
+                  </button>
+                </div>
+
+                <div className={cn(
+                  "pt-6 border-t text-[9px] uppercase tracking-wider text-center font-semibold mt-6 opacity-30",
+                  theme === 'dark' ? "border-white/5 text-white/80" : "border-slate-100 text-slate-700"
+                )}>
+                  <span>Módulo de Integração • Server-Side Access Tokens</span>
+                </div>
+              </>
+            )}
           </motion.div>
         </div>
       );

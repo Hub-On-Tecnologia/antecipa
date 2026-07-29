@@ -2,10 +2,13 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
+import crypto from "crypto";
 
 import fs from "fs";
 import { initializeApp, cert, getApps, getApp, App } from "firebase-admin/app";
 import { getAuth, DecodedIdToken } from "firebase-admin/auth";
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import rateLimit from "express-rate-limit";
 
 // Load environment variables
 dotenv.config();
@@ -66,7 +69,19 @@ export async function verifyFirebaseIdToken(idToken: string): Promise<DecodedIdT
 
 
 const app = express();
+// Configura 'trust proxy' antes de registrar middlewares de IP/rate-limit (necessário para Nginx)
+app.set("trust proxy", 1);
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+
+// Rate limiter para o endpoint público de consumo de tokens (10 req/min por IP)
+const consumeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { valid: false, error: "Muitas tentativas de consumo de token. Tente novamente mais tarde." },
+  statusCode: 429,
+});
 
 // Enable JSON bodies with a larger limit for base64 file uploads
 app.use(express.json({ limit: "50mb" }));
@@ -144,6 +159,122 @@ export async function dualAuthMiddleware(req: express.Request, res: express.Resp
   console.warn(`[AUTH] path=denied ip=${req.ip || req.socket.remoteAddress} endpoint=${req.originalUrl}`);
   return res.status(401).json({ error: "Acesso não autorizado." });
 }
+
+/**
+ * GET /api/access-tokens/verify-user
+ * Verifica se o usuário autenticado no Firebase é permitido na allowlist.
+ * Comentário obrigatório:
+ * Este check é UX, não segurança. A fronteira real é a allowlist em POST /api/access-tokens. Nunca confiar apenas neste retorno.
+ */
+app.get("/api/access-tokens/verify-user", dualAuthMiddleware, (req, res) => {
+  const user = (req as any).user as DecodedIdToken | undefined;
+  if (!user || !isUserAllowed(user)) {
+    return res.status(403).json({ allowed: false, error: "Conta não autorizada na allowlist." });
+  }
+  return res.status(200).json({ allowed: true, uid: user.uid, email: user.email });
+});
+
+/**
+ * POST /api/access-tokens
+ * Emissão de token de acesso no servidor com fonte criptográfica.
+ * Protegido por dualAuthMiddleware E isUserAllowed (allowlist).
+ */
+app.post("/api/access-tokens", dualAuthMiddleware, async (req, res) => {
+  try {
+    const user = (req as any).user as DecodedIdToken | undefined;
+    if (!user || !isUserAllowed(user)) {
+      return res.status(403).json({ error: "Acesso negado: Conta não autorizada na allowlist." });
+    }
+
+    const uuid = crypto.randomUUID().replace(/-/g, "");
+    const tokenId = `token_${uuid}`;
+
+    const db = getFirestore();
+    await db.collection("access_tokens").doc(tokenId).set({
+      createdAt: FieldValue.serverTimestamp(),
+      createdBy: user.uid,
+      createdByEmail: user.email || null,
+    });
+
+    console.log(`[AccessTokens] Token gerado no servidor: ${tokenId} por ${user.uid}`);
+    return res.status(200).json({ tokenId });
+  } catch (err: any) {
+    console.error("[AccessTokens] Erro ao gerar token de acesso:", err);
+    return res.status(500).json({ error: "Erro interno ao gerar token de acesso." });
+  }
+});
+
+/**
+ * POST /api/access-tokens/consume
+ * Validação e consumo atômico (uso único) do token de acesso via runTransaction do Firestore.
+ * NÃO está atrás de dualAuthMiddleware (endpoint público do portão).
+ * Protegido por rate-limiting (consumeLimiter).
+ */
+app.post("/api/access-tokens/consume", consumeLimiter, async (req, res) => {
+  const { tokenId } = req.body || {};
+  if (!tokenId || typeof tokenId !== "string" || tokenId.length > 128) {
+    return res.status(401).json({ valid: false, error: "Token inválido ou inexistente." });
+  }
+
+  try {
+    const db = getFirestore();
+    const docRef = db.collection("access_tokens").doc(tokenId);
+
+    let isValid = false;
+    let errorMessage = "";
+
+    await db.runTransaction(async (transaction) => {
+      const docSnap = await transaction.get(docRef);
+      if (!docSnap.exists) {
+        errorMessage = "Token inválido ou inexistente.";
+        return;
+      }
+
+      const data = docSnap.data();
+      const createdAt = data?.createdAt;
+
+      // Deleção atômica dentro da transação para garantir uso único concorrente
+      transaction.delete(docRef);
+
+      if (!createdAt) {
+        errorMessage = "Token inválido sem data de criação.";
+        return;
+      }
+
+      let createdTime = Date.now();
+      if (typeof createdAt.toMillis === "function") {
+        createdTime = createdAt.toMillis();
+      } else if (createdAt.seconds) {
+        createdTime = createdAt.seconds * 1000;
+      } else if (typeof createdAt === "number") {
+        createdTime = createdAt;
+      } else if (createdAt instanceof Date) {
+        createdTime = createdAt.getTime();
+      }
+
+      const now = Date.now();
+      const diff = now - createdTime;
+
+      // Janela de 1 minuto (60000ms) com 5s de tolerância para relógios dessincronizados
+      if (diff >= -5000 && diff <= 60000) {
+        isValid = true;
+      } else {
+        errorMessage = "Token de acesso expirado.";
+      }
+    });
+
+    if (isValid) {
+      console.log(`[AccessTokens] Token consumido com sucesso (atômico): ${tokenId}`);
+      return res.status(200).json({ valid: true });
+    } else {
+      console.warn(`[AccessTokens] Falha ao consumir token ${tokenId}: ${errorMessage}`);
+      return res.status(401).json({ valid: false, error: errorMessage || "Token inválido ou inexistente." });
+    }
+  } catch (err: any) {
+    console.error("[AccessTokens] Erro atômico no consumo de token:", err);
+    return res.status(500).json({ valid: false, error: "Erro interno na validação do token." });
+  }
+});
 
 // Security Middleware for Bitrix API proxy endpoints
 app.use("/api/bitrix", (req, res, next) => {
