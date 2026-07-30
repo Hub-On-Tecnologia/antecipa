@@ -86,9 +86,13 @@ export default function App() {
     };
   }, [firebaseUser]);
 
-  // Portão de acesso: sessão existente primeiro, token de uso único depois (RS-08).
-  // Quem decide é sempre o servidor — o cookie de sessão é httpOnly e assinado,
-  // então o cliente não consegue ler nem forjar.
+  // Portão de acesso: uso único de verdade (RS-08).
+  //
+  // Decisão de produto (reverte a sessão de 8h): o app deve gerar um token
+  // novo TODA VEZ que abrir ou recarregar a tela do portal, não só na
+  // primeira vez. Sem isso, qualquer recarga da WebView volta a bloquear o
+  // acesso — é o preço de não manter nenhum estado de acesso persistente
+  // no servidor além do consumo pontual do token.
   useEffect(() => {
     let cancelled = false;
 
@@ -97,18 +101,6 @@ export default function App() {
 
       setIsValidatingToken(true);
       try {
-        // 1. Já existe sessão válida? É isto que faz recarregar a WebView
-        //    (ou voltar para o app) não derrubar o usuário.
-        const sessionRes = await fetch('/api/session', { credentials: 'same-origin' });
-        if (sessionRes.ok) {
-          const session = await sessionRes.json();
-          if (session.valid) {
-            if (!cancelled) setIsAccessAllowed(true);
-            return;
-          }
-        }
-
-        // 2. Sem sessão: exige o token de uso único vindo do app.
         const params = new URLSearchParams(window.location.search);
         const token = params.get('token') || params.get('ref') || params.get('src');
         if (!token) return;
@@ -454,7 +446,15 @@ export default function App() {
                   </button>
 
                   <button
-                    onClick={() => {
+                    onClick={async () => {
+                      // Também desloga do Firebase — sem isso o botão não
+                      // fazia nada de fato, já que sessionStorage não é mais
+                      // usado para controlar acesso desde o RS-08.
+                      try {
+                        await auth.signOut();
+                      } catch (err) {
+                        console.error('Erro ao encerrar sessão:', err);
+                      }
                       sessionStorage.clear();
                       window.location.href = window.location.origin;
                     }}

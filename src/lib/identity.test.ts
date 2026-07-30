@@ -6,11 +6,7 @@ import {
   matchCorretor,
   acharPorCpf,
   mapCorretor,
-  isGateSessionFresh,
 } from './identity';
-
-const HORA = 60 * 60 * 1000;
-const OITO_HORAS = 8 * HORA;
 
 /** Linha típica do MariaDB, com os nomes de coluna reais da base. */
 const linha = (over: Record<string, any> = {}) => ({
@@ -197,39 +193,5 @@ describe('mapCorretor — só o necessário vai para a interface', () => {
     expect(c.nome).toBe('Maria');
     expect(c.empresa).toBe('X');
     expect(c.cpf).toBe('***.***.***-00');
-  });
-});
-
-describe('isGateSessionFresh — sessão do portão', () => {
-  const agora = 1_700_000_000_000;
-
-  it('aceita sessão recém-emitida', () => {
-    expect(isGateSessionFresh(String(agora), agora, OITO_HORAS)).toBe(true);
-  });
-
-  it('aceita sessão dentro da janela de 8h', () => {
-    expect(isGateSessionFresh(String(agora - 7 * HORA), agora, OITO_HORAS)).toBe(true);
-  });
-
-  it('recusa sessão expirada', () => {
-    expect(isGateSessionFresh(String(agora - 9 * HORA), agora, OITO_HORAS)).toBe(false);
-  });
-
-  it('recusa data no futuro — adiantar o relógio não estende a sessão', () => {
-    expect(isGateSessionFresh(String(agora + HORA), agora, OITO_HORAS)).toBe(false);
-  });
-
-  it('recusa valor ausente, vazio ou não numérico', () => {
-    expect(isGateSessionFresh(undefined, agora, OITO_HORAS)).toBe(false);
-    expect(isGateSessionFresh(null, agora, OITO_HORAS)).toBe(false);
-    expect(isGateSessionFresh('', agora, OITO_HORAS)).toBe(false);
-    expect(isGateSessionFresh('abc', agora, OITO_HORAS)).toBe(false);
-    expect(isGateSessionFresh('0', agora, OITO_HORAS)).toBe(false);
-    expect(isGateSessionFresh('-1', agora, OITO_HORAS)).toBe(false);
-  });
-
-  it('recusa exatamente 1ms após o limite', () => {
-    expect(isGateSessionFresh(String(agora - OITO_HORAS), agora, OITO_HORAS)).toBe(true);
-    expect(isGateSessionFresh(String(agora - OITO_HORAS - 1), agora, OITO_HORAS)).toBe(false);
   });
 });

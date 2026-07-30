@@ -18,6 +18,11 @@ const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firestoreDatabaseId);
 export const auth = getAuth();
 const googleProvider = new GoogleAuthProvider();
+// Sem isto, o Google reaproveita silenciosamente a última conta usada no
+// navegador — mesmo após signOut() no Firebase, que só encerra NOSSA sessão,
+// não a sessão do próprio Google. Forçar o seletor de conta é o que permite
+// trocar de usuário de fato.
+googleProvider.setCustomParameters({ prompt: 'select_account' });
 
 export enum OperationType {
   CREATE = 'create',

@@ -27,19 +27,11 @@ function registrar(nome: string, ok: boolean, detalhe: string, fatal = true) {
   checks.push({ nome, ok, detalhe, fatal });
 }
 
-// --- 1. Segredo de sessão do portão (RS-08) ---
-const sessionSecret = process.env.SESSION_SECRET || "";
-registrar(
-  "SESSION_SECRET",
-  sessionSecret.length >= 32,
-  sessionSecret.length === 0
-    ? "ausente — o servidor não sobe sem ele"
-    : sessionSecret.length < 32
-      ? `curto demais (${sessionSecret.length} caracteres, mínimo 32)`
-      : "definido e com tamanho adequado",
-);
+// Nota: SESSION_SECRET existiu aqui enquanto o portão mantinha uma sessão de
+// 8h via cookie assinado. Removido: decisão de produto voltou o acesso a
+// uso único de verdade, sem sessão persistente no servidor (ver server.ts).
 
-// --- 2. Credencial do Firebase Admin (RS-03) ---
+// --- 1. Credencial do Firebase Admin (RS-03) ---
 const inlineCred = process.env.FIREBASE_SERVICE_ACCOUNT;
 const pathCred = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
 const adcCred = process.env.GOOGLE_APPLICATION_CREDENTIALS;
@@ -71,7 +63,7 @@ if (inlineCred) {
 
 registrar("Credencial Firebase configurada", credencialConfigurada, detalheCred);
 
-// --- 3. A credencial FUNCIONA de verdade? ---
+// --- 2. A credencial FUNCIONA de verdade? ---
 // Estar configurada não basta: uma chave revogada ou de outro projeto passaria
 // na checagem acima e falharia só em produção.
 async function validarCredencial(): Promise<void> {
@@ -123,7 +115,7 @@ async function validarCredencial(): Promise<void> {
   }
 }
 
-// --- 4. Integrações de backend ---
+// --- 3. Integrações de backend ---
 registrar(
   "DB_API_KEY",
   Boolean(process.env.DB_API_KEY),
@@ -138,7 +130,7 @@ registrar(
     : "ausente — a integração Bitrix ficará indisponível",
 );
 
-// --- 5. Allowlist de ADMIN (RS-04) ---
+// --- 4. Allowlist de ADMIN (RS-04) ---
 // Não é fatal: corretores entram pelo vínculo com o MariaDB, não por esta
 // lista. Vazia significa apenas que ninguém pode gerar token de acesso pela
 // tela administrativa nem consultar a base de corretores.
@@ -153,7 +145,7 @@ registrar(
   false,
 );
 
-// --- 6. Token legado (transição do RS-12) ---
+// --- 5. Token legado (transição do RS-12) ---
 registrar(
   "ACCESS_TOKEN (legado)",
   Boolean(process.env.ACCESS_TOKEN),

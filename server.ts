@@ -9,7 +9,6 @@ import { initializeApp, cert, getApps, getApp, App } from "firebase-admin/app";
 import { getAuth, DecodedIdToken } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import rateLimit from "express-rate-limit";
-import cookieParser from "cookie-parser";
 // Mesmas funções usadas pelo frontend: a normalização precisa ser idêntica dos
 // dois lados, senão um corretor válido falharia na vinculação.
 import { normalizeCPF } from "./src/lib/utils";
@@ -17,7 +16,7 @@ import { normalizeCPF } from "./src/lib/utils";
 // poder ser testada sem subir o servidor.
 import {
   isUserAllowed, maskCpf, cpfDaLinha, mapCorretor, matchCorretor, acharPorCpf,
-  isGateSessionFresh, TokenIdentidade,
+  TokenIdentidade,
 } from "./src/lib/identity";
 
 // Load environment variables
@@ -146,63 +145,18 @@ const consumeLimiter = rateLimit({
 app.use(express.json({ limit: "50mb" }));
 
 /**
- * Sessão do portão de acesso (RS-08).
+ * Portão de acesso (RS-08): uso único de verdade, sem sessão persistente.
  *
- * O token temporário é de uso único e destruído no consumo. Sem uma sessão,
- * qualquer recarga da WebView derrubaria o usuário — o que quebra o uso real
- * dentro do app. A sessão anterior vivia em sessionStorage, que o usuário
- * conseguia forjar pelo DevTools em uma linha.
+ * Decisão de produto: o token expira em 1 minuto e é destruído no consumo.
+ * Não existe estado de acesso guardado no servidor além disso — o app é
+ * responsável por gerar um token novo toda vez que abrir ou recarregar a
+ * tela do portal, não apenas na primeira vez.
  *
- * Aqui a sessão é um cookie httpOnly ASSINADO pelo servidor: o navegador não
- * consegue ler nem falsificar, e a validade é reconferida no servidor a cada
- * requisição. INV-2 (a fronteira é o servidor) e INV-5 (assinatura via
- * biblioteca mantida, sem cripto artesanal).
+ * (Uma versão anterior manteve uma sessão de 8h via cookie assinado para que
+ * a recarga da WebView não expulsasse o usuário. Foi revertida a pedido do
+ * produto: prefere-se a janela de exposição mínima do uso único a uma sessão
+ * de longa duração, mesmo assinada.)
  */
-const SESSION_COOKIE = "antecipa_gate";
-const SESSION_MAX_AGE_MS = 8 * 60 * 60 * 1000; // 8h — um turno de trabalho
-
-function resolveSessionSecret(): string {
-  const secret = process.env.SESSION_SECRET;
-  if (secret && secret.length >= 32) return secret;
-
-  const msg =
-    "[Session] CRITICAL: SESSION_SECRET ausente ou com menos de 32 caracteres. " +
-    "Sem ele os cookies de sessão não podem ser assinados com segurança.";
-
-  if (process.env.NODE_ENV === "production") {
-    // INV-8: falhar fechado. Sem segredo forte não há sessão confiável.
-    throw new Error(msg);
-  }
-
-  console.warn(`${msg} Gerando segredo efêmero para desenvolvimento.`);
-  return crypto.randomBytes(48).toString("hex");
-}
-
-const SESSION_SECRET = resolveSessionSecret();
-app.use(cookieParser(SESSION_SECRET));
-
-/** Emite a sessão do portão após consumo bem-sucedido de um token. */
-function issueGateSession(res: express.Response): void {
-  res.cookie(SESSION_COOKIE, String(Date.now()), {
-    signed: true,
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    maxAge: SESSION_MAX_AGE_MS,
-    path: "/",
-  });
-}
-
-/**
- * Valida a sessão do portão. A assinatura é conferida pelo cookie-parser;
- * aqui reconferimos a idade no servidor para não depender apenas do maxAge
- * do navegador, que o cliente controla.
- */
-function hasValidGateSession(req: express.Request): boolean {
-  const issuedAt = (req as any).signedCookies?.[SESSION_COOKIE];
-  return isGateSessionFresh(issuedAt, Date.now(), SESSION_MAX_AGE_MS);
-}
-
 const isPlaceholderUrl = (url: string) => {
   return !url || url.includes("seu-dominio") || url.includes("USER_ID") || url.includes("TOKEN");
 };
@@ -588,9 +542,9 @@ app.post("/api/access-tokens/consume", consumeLimiter, async (req, res) => {
     });
 
     if (result.valid) {
-      // Troca imediata do token de uso único por uma sessão assinada (RS-08),
-      // para que recarregar a WebView não derrube o usuário.
-      issueGateSession(res);
+      // Uso único de verdade: nenhuma sessão é emitida. Consumir este token
+      // concede acesso apenas ao carregamento de página atual (estado em
+      // memória no React); uma recarga exige um token novo do app.
       console.log(`[AccessTokens] Token consumido com sucesso (atômico): ${tokenId}`);
       return res.status(200).json({ valid: true });
     } else {
@@ -601,25 +555,6 @@ app.post("/api/access-tokens/consume", consumeLimiter, async (req, res) => {
     console.error("[AccessTokens] Erro atômico no consumo de token:", err);
     return res.status(500).json({ valid: false, error: "Erro interno na validação do token." });
   }
-});
-
-/**
- * GET /api/session
- * Informa se a sessão do portão ainda é válida. Chamado ao carregar a página
- * antes de exigir um token novo — é o que permite recarregar a WebView sem
- * perder o acesso. A decisão é do servidor; o cliente apenas pergunta.
- */
-app.get("/api/session", (req, res) => {
-  return res.status(200).json({ valid: hasValidGateSession(req) });
-});
-
-/**
- * POST /api/session/logout
- * Encerra a sessão do portão.
- */
-app.post("/api/session/logout", (req, res) => {
-  res.clearCookie(SESSION_COOKIE, { path: "/" });
-  return res.status(200).json({ ok: true });
 });
 
 // Bitrix: autenticar e, em seguida, exigir vínculo com corretor ativo (RS-04).

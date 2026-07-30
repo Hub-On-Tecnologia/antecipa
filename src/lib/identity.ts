@@ -129,18 +129,3 @@ export function mapCorretor(row: Record<string, any>): Corretor {
     allFields: { Empresa: empresa, Cargo: cargo, 'Superintendência': superintendencia, Loja: loja },
   };
 }
-
-/**
- * Idade da sessão do portão conferida no servidor.
- *
- * Não basta o maxAge do cookie: esse prazo é guardado pelo navegador, que é o
- * cliente, e portanto não é confiável. Data no futuro também é recusada, para
- * que adiantar o relógio não estenda a sessão.
- */
-export function isGateSessionFresh(issuedAt: unknown, agora: number, maxAgeMs: number): boolean {
-  const emitidoEm = Number(issuedAt);
-  if (!Number.isFinite(emitidoEm) || emitidoEm <= 0) return false;
-
-  const idade = agora - emitidoEm;
-  return idade >= 0 && idade <= maxAgeMs;
-}
