@@ -12,7 +12,9 @@
     "lint": "tsc --noEmit",
     "preflight": "tsx scripts/preflight.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "rules:diff": "firebase firestore:rules:get --database ai-studio-458009ee-a488-47a9-a8ab-31ed63f2ea80",
+    "rules:deploy": "firebase deploy --only firestore:rules"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
