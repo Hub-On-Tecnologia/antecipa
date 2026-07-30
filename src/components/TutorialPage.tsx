@@ -304,7 +304,54 @@ function gerarLinkAcesso() {
                 "text-[11px] leading-relaxed",
                 theme === 'dark' ? "text-white/50" : "text-slate-500"
               )}>
-                Ao carregar a URL com o parâmetro <code>?token=...</code>, o Portal valida o tempo decorrido (máx 1 minuto) e <strong>deleta o registro imediatamente</strong>. Se recarregar a página, o acesso é negado.
+                Ao carregar a URL com o parâmetro <code>?token=...</code>, o Portal valida o tempo decorrido (máx 1 minuto) e <strong>deleta o registro imediatamente</strong>. <strong>Não existe sessão persistente</strong>: qualquer recarga da tela do portal exige um token novo. Seu app deve chamar <code>gerarLinkAcesso()</code> toda vez que abrir ou recarregar essa tela — não apenas na primeira vez.
+              </p>
+            </div>
+          </div>
+
+          {/* Avisos críticos de integração */}
+          <div className={cn(
+            "p-5 rounded-sm border space-y-4",
+            theme === 'dark' ? "bg-amber-500/[0.03] border-amber-500/20" : "bg-amber-50 border-amber-200"
+          )}>
+            <h4 className="text-xs font-bold text-amber-500 uppercase tracking-wider flex items-center gap-2">
+              <ShieldCheck size={12} />
+              <span>Teste isto antes de finalizar a integração</span>
+            </h4>
+
+            <div className="space-y-1.5">
+              <p className={cn("text-[11px] font-semibold", theme === 'dark' ? "text-white/80" : "text-slate-700")}>
+                1. Login do Google dentro da sua Webview
+              </p>
+              <p className={cn(
+                "text-[11px] leading-relaxed",
+                theme === 'dark' ? "text-white/50" : "text-slate-500"
+              )}>
+                O corretor faz login com a conta Google <strong>dentro</strong> da tela do portal. Por política própria do Google (anti-phishing), esse login pode ser <strong>bloqueado</strong> se o Google detectar uma Webview genérica embutida (Android <code>WebView</code> / iOS <code>WKWebView</code> puros) — o corretor veria algo como "Este navegador ou app pode não ser seguro", mesmo com o portal funcionando corretamente. Teste esse passo cedo. Se travar, abra essa etapa numa <strong>Custom Tab</strong> (Android) ou <strong>SFSafariViewController</strong> (iOS) em vez da Webview pura.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <p className={cn("text-[11px] font-semibold", theme === 'dark' ? "text-white/80" : "text-slate-700")}>
+                2. Token novo a cada abertura da tela
+              </p>
+              <p className={cn(
+                "text-[11px] leading-relaxed",
+                theme === 'dark' ? "text-white/50" : "text-slate-500"
+              )}>
+                Não existe sessão de longa duração no servidor. Se o app reabrir a tela do portal (inclusive após voltar de segundo plano) carregando a mesma URL já usada, o corretor será bloqueado. Gere um link novo toda vez.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <p className={cn("text-[11px] font-semibold", theme === 'dark' ? "text-white/80" : "text-slate-700")}>
+                3. Próxima fase: App Check (ainda não obrigatório)
+              </p>
+              <p className={cn(
+                "text-[11px] leading-relaxed",
+                theme === 'dark' ? "text-white/50" : "text-slate-500"
+              )}>
+                Vamos exigir futuramente o Firebase App Check (Play Integrity no Android, App Attest no iOS) para atestar que o acesso vem do app genuíno. Não é necessário hoje, mas evite decisões de arquitetura na Webview que dificultem adicionar isso depois.
               </p>
             </div>
           </div>
@@ -479,7 +526,15 @@ function gerarLinkAcesso() {
                 </li>
                 <li className="flex items-center gap-2">
                   <Check size={14} className="text-emerald-500" />
-                  <span className={theme === 'dark' ? "text-white/70" : "text-slate-600"}>Confirme que atualizações de tela barram o acesso.</span>
+                  <span className={theme === 'dark' ? "text-white/70" : "text-slate-600"}>Confirme que recarregar a tela barra o acesso (é o esperado).</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <Check size={14} className="text-emerald-500" />
+                  <span className={theme === 'dark' ? "text-white/70" : "text-slate-600"}><strong>Teste o login Google dentro da sua Webview real</strong>, não só no navegador do computador.</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <Check size={14} className="text-emerald-500" />
+                  <span className={theme === 'dark' ? "text-white/70" : "text-slate-600"}>Confirme que a tela gera link novo mesmo ao reabrir do zero.</span>
                 </li>
               </ul>
             </div>
