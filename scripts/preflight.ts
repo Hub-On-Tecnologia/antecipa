@@ -16,6 +16,7 @@ import dotenv from "dotenv";
 import fs from "fs";
 import { initializeApp, cert, getApps, App } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
+import { getFirestore } from "firebase-admin/firestore";
 
 dotenv.config();
 
@@ -93,8 +94,32 @@ async function validarCredencial(): Promise<void> {
 
     await getAuth(app).createCustomToken("preflight_probe");
     registrar("Credencial Firebase válida", true, "assinatura de token funcionou");
+
+    // Auth funcionar NÃO garante que o Firestore funciona. Este projeto usa um
+    // banco NOMEADO: com o ID errado, getFirestore aponta para "(default)",
+    // que não existe, e todo endpoint que grava vínculo ou token devolve 500.
+    // Foi exatamente isso que passou pelo preflight anterior e só apareceu em
+    // produção — por isso a sonda de leitura real abaixo.
+    const dbId =
+      process.env.FIREBASE_FIRESTORE_DATABASE_ID ||
+      process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID ||
+      "(default)";
+
+    try {
+      const db = dbId === "(default)" ? getFirestore(app) : getFirestore(app, dbId);
+      await db.collection("preflight_probe").limit(1).get();
+      registrar("Firestore acessível", true, `leitura OK no banco "${dbId}"`);
+    } catch (errDb: any) {
+      registrar(
+        "Firestore acessível",
+        false,
+        `falhou no banco "${dbId}": ${errDb.message}. ` +
+          "Confira FIREBASE_FIRESTORE_DATABASE_ID / VITE_FIREBASE_FIRESTORE_DATABASE_ID.",
+      );
+    }
   } catch (err: any) {
     registrar("Credencial Firebase válida", false, `falhou: ${err.message}`);
+    registrar("Firestore acessível", false, "pulado — credencial inválida");
   }
 }
 

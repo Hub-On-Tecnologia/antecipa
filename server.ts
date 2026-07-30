@@ -90,6 +90,26 @@ async function assertFirebaseCredentials(): Promise<void> {
 }
 
 /**
+ * Este projeto usa um Firestore NOMEADO, não o banco "(default)".
+ *
+ * getFirestore() sem argumento aponta para "(default)", que não existe aqui —
+ * toda operação falharia com NOT_FOUND e o endpoint devolveria 500. O frontend
+ * já resolvia isso via VITE_FIREBASE_FIRESTORE_DATABASE_ID; o servidor tem de
+ * usar o mesmo ID. Aceita a variável sem prefixo (preferida no servidor) e cai
+ * na VITE_, que é config pública e já existe no .env do VPS.
+ */
+const FIRESTORE_DATABASE_ID =
+  process.env.FIREBASE_FIRESTORE_DATABASE_ID ||
+  process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID ||
+  "(default)";
+
+function firestore() {
+  return FIRESTORE_DATABASE_ID === "(default)"
+    ? getFirestore()
+    : getFirestore(FIRESTORE_DATABASE_ID);
+}
+
+/**
  * Verifica um ID Token do Firebase usando firebase-admin (RS-03).
  * Retorna o token decodificado ou null se inválido/inexistente.
  */
@@ -318,7 +338,7 @@ async function fetchCorretoresAtivos(): Promise<any[]> {
 }
 
 async function getBinding(uid: string): Promise<Binding | null> {
-  const snap = await getFirestore().collection("user_bindings").doc(uid).get();
+  const snap = await firestore().collection("user_bindings").doc(uid).get();
   if (!snap.exists) return null;
   const d = snap.data() || {};
   return { cpf: d.cpf, nome: d.nome, email: d.email ?? null };
@@ -410,7 +430,7 @@ app.post("/api/auth/bind", bindLimiter, dualAuthMiddleware, async (req, res) => 
   }
 
   try {
-    const db = getFirestore();
+    const db = firestore();
 
     // Já vinculado? Idempotente.
     const existing = await getBinding(user.uid);
@@ -496,7 +516,7 @@ app.post("/api/access-tokens", dualAuthMiddleware, async (req, res) => {
     const uuid = crypto.randomUUID().replace(/-/g, "");
     const tokenId = `token_${uuid}`;
 
-    const db = getFirestore();
+    const db = firestore();
     await db.collection("access_tokens").doc(tokenId).set({
       createdAt: FieldValue.serverTimestamp(),
       createdBy: user.uid,
@@ -524,7 +544,7 @@ app.post("/api/access-tokens/consume", consumeLimiter, async (req, res) => {
   }
 
   try {
-    const db = getFirestore();
+    const db = firestore();
     const docRef = db.collection("access_tokens").doc(tokenId);
 
     // O resultado é RETORNADO pela transação, nunca escrito em estado externo.
