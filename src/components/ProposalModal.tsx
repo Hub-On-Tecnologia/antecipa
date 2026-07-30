@@ -5,6 +5,12 @@ import { cn } from '../lib/utils';
 import { updateBitrixDealWithFile, rejectBitrixDeal, parseBitrixCurrency } from '../services/bitrixService';
 import { saveSignature, updateCommissionStatus } from '../services/firebaseService';
 
+/**
+ * O repasse da antecipação é sempre feito por Conta Pronta — não existe
+ * escolha de modalidade, então o quadro-resumo do contrato traz valor fixo.
+ */
+const FORMA_PAGAMENTO = 'CONTA PRONTA';
+
 async function getClientIp(): Promise<string> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 3000);
@@ -55,10 +61,6 @@ export default function ProposalModal({ isOpen, onClose, proposal, userInfo, onS
     operacaoTipo: 'VENDA',
     imovel: '',
     cliente: '',
-    valorBruto: '',
-    percentualCedido: '100',
-    formaPagamento: localStorage.getItem('antecipa_formaPagamento') || 'PIX',
-    dadosBancarios: localStorage.getItem('antecipa_dadosBancarios') || '',
     concordo: false
   });
 
@@ -73,7 +75,6 @@ export default function ProposalModal({ isOpen, onClose, proposal, userInfo, onS
       const imovelParts = [details.empreendimento, details.blocoUnidade].filter(Boolean);
       const imovelStr = imovelParts.length > 0 ? imovelParts.join(' - ') : '';
       const clienteStr = details.cliente || details.nome || '';
-      const valorBrutoStr = details.valorNumeric ? formatCurrency(details.valorNumeric) : (details.valorOriginalP || details.valor || '');
 
       setFormData(prev => ({
         ...prev,
@@ -81,7 +82,6 @@ export default function ProposalModal({ isOpen, onClose, proposal, userInfo, onS
         cpf: userInfo.cpf,
         imovel: imovelStr,
         cliente: clienteStr,
-        valorBruto: valorBrutoStr,
         concordo: false
       }));
       setStep('review');
@@ -91,7 +91,7 @@ export default function ProposalModal({ isOpen, onClose, proposal, userInfo, onS
   // Persist common fields as user types
   const updateField = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
-    if (['creci', 'email', 'endereco', 'formaPagamento', 'dadosBancarios'].includes(field)) {
+    if (['creci', 'email', 'endereco'].includes(field)) {
       localStorage.setItem(`antecipa_${field}`, value);
     }
   };
@@ -117,9 +117,8 @@ CESSIONÁRIA: ANTECIPA SOLUÇÕES FINANCEIRAS LTDA, CNPJ: 12.670.349/0001-10, En
 OPERAÇÃO VINCULADA: [${formData.operacaoTipo}], Imóvel: ${formData.imovel}, Cliente(s): ${formData.cliente}.
 
 CRÉDITO DE COMISSÃO:
-Valor bruto estimado da comissão: ${formData.valorBruto}
-Forma De Pagamento Da Antecipação: [${formData.formaPagamento}]
-Dados bancários: ${formData.dadosBancarios}.
+Valor líquido antecipado: ${formatCurrency(proposal.valorLiberado)}
+Forma De Pagamento Da Antecipação: [${FORMA_PAGAMENTO}]
 
 
 DAS CLÁUSULAS GERAIS
@@ -218,7 +217,6 @@ DATA/HORA: ${now.toLocaleString('pt-BR')}
         userAgent,
         metadata: {
            creci: formData.creci,
-           banco: formData.dadosBancarios,
            imovel: formData.imovel,
            cliente: formData.cliente
         }
@@ -571,7 +569,10 @@ DATA/HORA: ${now.toLocaleString('pt-BR')}
                       <p><span className={theme === 'dark' ? "text-white/20 font-bold" : "text-slate-400 font-bold"}>CEDENTE (CORRETOR):</span> {formData.nome}, CPF: {formData.cpf}, CRECI: {formData.creci}, Endereço: {formData.endereco}, E-mail: {formData.email};</p>
                       <p><span className={theme === 'dark' ? "text-white/20 font-bold" : "text-slate-400 font-bold"}>CESSIONÁRIA:</span> ANTECIPA SOLUÇÕES FINANCEIRAS LTDA, CNPJ: 12.670.349/0001-10, Endereço: AV GOVERNADOR AGAMENON MAGALHAES, No 4775, Sala 1201 e 1202 - EMPR BOA VISTA, ILHA DO LEITE - RECIFE/PE, E-mail: contato@antecipa.com.br;</p>
                       <p><span className={theme === 'dark' ? "text-white/20 font-bold" : "text-slate-400 font-bold"}>OPERAÇÃO VINCULADA:</span> [{formData.operacaoTipo}], Imóvel: {formData.imovel}, Cliente(s): {formData.cliente}.</p>
-                      <p><span className={theme === 'dark' ? "text-white/20 font-bold" : "text-slate-400 font-bold"}>Adiantamento autorizado:</span> {formatCurrency(proposal.valorLiberado)}</p>
+                      {/* Espelha o bloco CRÉDITO DE COMISSÃO do contractText: o que o
+                          corretor lê aqui tem que ser o que fica arquivado no Bitrix. */}
+                      <p><span className={theme === 'dark' ? "text-white/20 font-bold" : "text-slate-400 font-bold"}>CRÉDITO DE COMISSÃO — Valor líquido antecipado:</span> {formatCurrency(proposal.valorLiberado)}</p>
+                      <p><span className={theme === 'dark' ? "text-white/20 font-bold" : "text-slate-400 font-bold"}>Forma De Pagamento Da Antecipação:</span> [{FORMA_PAGAMENTO}]</p>
                     </section>
 
                     <section className={cn("border-t pt-4 space-y-4 text-justify", theme === 'dark' ? "border-white/5" : "border-slate-200")}>

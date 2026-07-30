@@ -6,6 +6,52 @@
 
 ---
 
+## [2026-07-30] — Quadro-Resumo do Contrato Alinhado à Minuta "TERMO DE ANTECIPAÇÃO (valores) v.2"
+
+**Tipo:** Fix
+**Arquivos:**
+- `src/components/ProposalModal.tsx` (bloco CRÉDITO DE COMISSÃO no `contractText`, no preview de assinatura e limpeza do `formData`)
+- `.docs/CHANGELOG.md` (este log)
+
+**Por quê:**
+Conferência da minuta oficial contra o contrato gerado pelo portal. As dez
+cláusulas estavam idênticas; toda a divergência estava no quadro-resumo, e o
+mais grave era o `.txt` arquivado no Bitrix não informar valor nenhum de
+antecipação — apesar de a Cláusula 2.1 remeter a "o valor indicado no
+quadro-resumo". Além disso, a tela que o corretor lia antes de aceitar não era
+igual ao arquivo que ficava guardado.
+
+**Detalhes da Implementação:**
+- **Valor líquido antecipado (novo no arquivo):** passa a constar no
+  `contractText` usando `proposal.valorLiberado`, o valor que a integração do
+  Bitrix informa (campo `VALOR_LIBERADO`) e que já era exibido na tela.
+- **Valor bruto estimado da comissão:** removido do contrato (decisão do Pedro).
+- **Percentual cedido:** removido; o campo `percentualCedido` existia no
+  `formData` com valor fixo `'100'` e nunca era exibido nem gravado — código
+  morto, agora eliminado.
+- **Forma de pagamento:** fixada em `CONTA PRONTA` via constante
+  `FORMA_PAGAMENTO`. Antes vinha do `localStorage` com fallback "PIX", sem
+  nenhum campo no formulário que a preenchesse.
+- **Dados bancários:** removidos do contrato e do metadado `banco` da
+  assinatura no Firestore — não havia campo no formulário, então o contrato
+  assinado sempre saía com "Dados bancários: ." em branco.
+- **Tela = arquivo:** o preview de assinatura passou a exibir o mesmo bloco
+  CRÉDITO DE COMISSÃO do texto arquivado. Antes a tela mostrava o valor do
+  adiantamento e escondia forma de pagamento; o arquivo fazia o inverso.
+
+**Impacto:**
+- O contrato assinado e arquivado passa a declarar quanto foi antecipado.
+- O que o corretor lê antes de marcar "li e concordo" é o que fica guardado.
+- Nenhuma cláusula (1 a 10) foi alterada.
+
+**Pendência registrada:** a Cláusula 1.2 menciona "o percentual indicado no
+quadro-resumo", que deixou de existir. Se a cessão é sempre integral, o texto
+da cláusula deveria dizer isso — decisão jurídica, não tocada aqui.
+
+**Verificação:** `npm run lint`, `npm test` (58 testes) e `npm run build` — OK. Diff automatizado da minuta (.docx) contra o `contractText` confirma que só restam as diferenças propositais (Cessionária preenchida, data e bloco de assinatura digital).
+
+---
+
 ## [2026-07-30] — Ajustes de Regra de Negócio para o Lançamento (Parcial Suspenso, Garantia e Contrato via WhatsApp)
 
 **Tipo:** Feature / Fix
