@@ -42,21 +42,28 @@ export default function TutorialPage({ theme, toggleTheme }: TutorialPageProps) 
 // npm install firebase-admin
 
 const admin = require("firebase-admin");
+const crypto = require("crypto");
 
 // Inicialize o SDK (Use as credenciais do seu projeto)
 admin.initializeApp({
   credential: admin.credential.applicationDefault() // Ou use serviceAccountKey.json
 });
 
-const db = admin.firestore();
+// ATENCAO: este projeto usa um Firestore NOMEADO, nao o banco "(default)".
+// Sem passar o databaseId o SDK aponta para "(default)" e toda gravacao falha
+// com NOT_FOUND.
+const DATABASE_ID = "${import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || '(default)'}";
+const db = admin.firestore(undefined, DATABASE_ID);
 
 /**
  * Gera um link de acesso temporário e seguro para o Portal Antecipa
  * @returns {Promise<string>} URL de acesso de uso único
  */
 async function gerarLinkAcesso() {
-  // 1. Gera um identificador aleatório seguro de 16 caracteres
-  const token = "token_" + Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 10);
+  // 1. Gera um identificador aleatorio CRIPTOGRAFICO.
+  //    Nao use Math.random(): ele e previsivel e um token adivinhavel
+  //    permitiria abrir o portal sem passar pelo app.
+  const token = "token_" + crypto.randomBytes(16).toString("hex");
   
   // 2. Registra o token no Firestore com data de criação do servidor
   const tokenRef = db.collection("access_tokens").doc(token);
@@ -80,7 +87,11 @@ import secrets
 cred = credentials.ApplicationDefault()
 firebase_admin.initialize_app(cred)
 
-db = firestore.client()
+# ATENCAO: este projeto usa um Firestore NOMEADO, nao o banco "(default)".
+# Sem informar o database_id o SDK aponta para "(default)" e toda gravacao
+# falha com NOT_FOUND.
+DATABASE_ID = "${import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || '(default)'}"
+db = firestore.client(database_id=DATABASE_ID)
 
 def gerar_link_acesso():
     # 1. Gera um token aleatório seguro de 16 bytes (hex)
@@ -100,23 +111,28 @@ def gerar_link_acesso():
 // composer require google/cloud-firestore
 
 use Google\\Cloud\\Firestore\\FirestoreClient;
+use Google\\Cloud\\Firestore\\FieldValue;
 
 /**
  * Gera o link seguro para abrir a Webview do Portal
  */
 function gerarLinkAcesso() {
-    // Inicialize o Firestore Client
+    // ATENCAO: informe o database — este projeto usa um Firestore NOMEADO,
+    // nao o banco "(default)".
     $db = new FirestoreClient([
-        'projectId' => '${import.meta.env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0436981001'}'
+        'projectId' => '${import.meta.env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0436981001'}',
+        'database' => '${import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || '(default)'}'
     ]);
 
     // 1. Gera um token aleatório seguro de uso único
     $token = "token_" . bin2hex(random_bytes(12));
 
-    // 2. Grava no Firestore com o timestamp atual
+    // 2. Grava no Firestore com o timestamp do SERVIDOR.
+    //    Com new DateTime() valeria o relogio da sua maquina: qualquer
+    //    defasagem faz o token nascer expirado ou durar mais de 1 minuto.
     $tokenRef = $db->collection('access_tokens')->document($token);
     $tokenRef->set([
-        'createdAt' => new \\DateTime()
+        'createdAt' => FieldValue::serverTimestamp()
     ]);
 
     // 3. Monta e retorna o link de acesso seguro
