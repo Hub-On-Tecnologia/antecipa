@@ -1,8 +1,16 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { X, Shield, CheckCircle2, AlertCircle, Info, DollarSign, AlertTriangle } from 'lucide-react';
+import { X, Shield, CheckCircle2, AlertCircle, Info, DollarSign, AlertTriangle, Construction } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Receivable } from '../services/sheetsService';
+
+/**
+ * Adiantamento parcial está fora do ar para o lançamento ("em construção").
+ * Toda a mecânica continua no código (valor personalizado, atalhos de
+ * percentual e garantia obrigatória maior que o valor adiantado); para
+ * reabrir a modalidade basta trocar esta constante para `true`.
+ */
+const PARTIAL_ADVANCE_ENABLED = false;
 
 interface CollateralModalProps {
   isOpen: boolean;
@@ -46,9 +54,12 @@ export default function CollateralModal({
     }
   }, [isOpen, primaryReceivable, maxAvailable]);
 
-  // Filtra candidatos a garantia (outros títulos do usuário com saldo disponível > 0)
+  // Filtra candidatos a garantia (títulos do usuário com saldo disponível > 0).
+  // Regra de negócio: parcelas da MESMA negociação (mesmo PV) não servem de
+  // garantia — se o negócio for distratado, o título adiantado e a garantia
+  // caem juntos, o que anula a proteção da operação.
   const validCandidates = availableReceivables.filter(r => {
-    return r.receivableId !== primaryReceivable.receivableId;
+    return String(r.id) !== String(primaryReceivable.id);
   });
 
   const selectedCollaterals = validCandidates.filter(r => selectedIds.includes(r.receivableId));
@@ -195,29 +206,55 @@ export default function CollateralModal({
 
               <button
                 type="button"
+                disabled={!PARTIAL_ADVANCE_ENABLED}
                 onClick={() => {
+                  if (!PARTIAL_ADVANCE_ENABLED) return;
                   setAdvanceType('PARCIAL');
                   if (partialValue === maxAvailable) {
                     setPercentage(0.5); // Default 50% for partial
                   }
                 }}
                 className={cn(
-                  "p-4 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between",
-                  advanceType === 'PARCIAL'
-                    ? "border-amber-500 bg-amber-500/10 ring-2 ring-amber-500/30"
-                    : (theme === 'dark' ? "border-white/10 hover:border-white/20 bg-white/5" : "border-slate-200 hover:border-slate-300 bg-slate-50")
+                  "p-4 rounded-lg border text-left transition-all flex flex-col justify-between",
+                  !PARTIAL_ADVANCE_ENABLED
+                    ? (theme === 'dark'
+                        ? "border-white/5 bg-white/[0.02] cursor-not-allowed"
+                        : "border-slate-200 bg-slate-100/70 cursor-not-allowed")
+                    : advanceType === 'PARCIAL'
+                      ? "border-amber-500 bg-amber-500/10 ring-2 ring-amber-500/30 cursor-pointer"
+                      : (theme === 'dark' ? "border-white/10 hover:border-white/20 bg-white/5 cursor-pointer" : "border-slate-200 hover:border-slate-300 bg-slate-50 cursor-pointer")
                 )}
               >
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-xs font-bold uppercase tracking-wider text-amber-400">PARCIAL</span>
-                  {advanceType === 'PARCIAL' && <CheckCircle2 size={16} className="text-amber-500" />}
+                  <span className={cn(
+                    "text-xs font-bold uppercase tracking-wider",
+                    PARTIAL_ADVANCE_ENABLED ? "text-amber-400" : (theme === 'dark' ? "text-white/30" : "text-slate-400")
+                  )}>
+                    PARCIAL
+                  </span>
+                  {!PARTIAL_ADVANCE_ENABLED
+                    ? <Construction size={16} className={theme === 'dark' ? "text-white/30" : "text-slate-400"} />
+                    : advanceType === 'PARCIAL' && <CheckCircle2 size={16} className="text-amber-500" />}
                 </div>
-                <p className={cn("text-sm font-semibold", theme === 'dark' ? "text-white" : "text-slate-800")}>
-                  Personalizado
-                </p>
-                <p className={cn("text-[10px] mt-1 leading-tight", theme === 'dark' ? "text-white/40" : "text-slate-500")}>
-                  Exige alocação de garantia superior ao valor antecipado.
-                </p>
+                {PARTIAL_ADVANCE_ENABLED ? (
+                  <>
+                    <p className={cn("text-sm font-semibold", theme === 'dark' ? "text-white" : "text-slate-800")}>
+                      Personalizado
+                    </p>
+                    <p className={cn("text-[10px] mt-1 leading-tight", theme === 'dark' ? "text-white/40" : "text-slate-500")}>
+                      Exige alocação de garantia superior ao valor antecipado.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className={cn("text-sm font-semibold", theme === 'dark' ? "text-white/40" : "text-slate-500")}>
+                      Em construção
+                    </p>
+                    <p className={cn("text-[10px] mt-1 leading-tight", theme === 'dark' ? "text-white/30" : "text-slate-400")}>
+                      Modalidade em desenvolvimento. Por enquanto, o adiantamento é sempre do saldo integral.
+                    </p>
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -297,6 +334,17 @@ export default function CollateralModal({
               </span>
             </div>
 
+            <p className={cn(
+              "text-[10px] leading-tight mb-3 flex items-start gap-1.5",
+              theme === 'dark' ? "text-white/40" : "text-slate-500"
+            )}>
+              <Info size={12} className="shrink-0 mt-0.5" />
+              <span>
+                Parcelas da mesma negociação (PV {primaryReceivable.id}) não podem ser oferecidas como garantia deste
+                adiantamento. Só entram na lista títulos de outras negociações.
+              </span>
+            </p>
+
             {/* Candidate List */}
             <div className={cn(
               "border rounded-lg max-h-[200px] overflow-y-auto divide-y custom-scrollbar transition-colors duration-300 mb-3",
@@ -306,7 +354,7 @@ export default function CollateralModal({
                 <div className="p-8 text-center">
                   <Info size={20} className={cn("mx-auto mb-2 opacity-40")} />
                   <p className={cn("text-xs uppercase tracking-wider opacity-60 font-medium")}>
-                    Não há outros títulos disponíveis para oferecer como garantia.
+                    Não há títulos de outras negociações disponíveis para oferecer como garantia.
                   </p>
                 </div>
               ) : (

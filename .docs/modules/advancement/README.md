@@ -17,12 +17,10 @@ Gerencia o fluxo completo de solicitação de antecipação de comissões.
 ```
 Dashboard → usuário seleciona PV
      ↓
-ProposalModal abre
-     ├── Tipo: Total (valor cheio)
-     └── Tipo: Parcial (usuário define valor)
-     ↓
-CollateralModal (opcional)
-     └── Usuário pode adicionar outros PVs como garantia
+CollateralModal abre
+     ├── Tipo: Total (valor cheio) — única modalidade ativa
+     ├── Tipo: Parcial — DESATIVADA ("Em construção")
+     └── Garantia (opcional): outros PVs como colateral
      ↓
 Confirmação → 2 ações paralelas:
      ├── bitrixService.createDeal() → CRM
@@ -31,6 +29,9 @@ Confirmação → 2 ações paralelas:
 SuccessModal exibe resultado
      ↓
 NotificationCenter atualiza em tempo real (onSnapshot)
+     ↓
+Backoffice aprova → ProposalModal (assinatura do contrato)
+     └── Sucesso: avisa que o contrato será enviado pelo WhatsApp
 ```
 
 ## Estados de uma Solicitação
@@ -46,7 +47,18 @@ NotificationCenter atualiza em tempo real (onSnapshot)
 - Uma solicitação pode ter **colaterais** (outros PVs como garantia)
 - O colateral é salvo como documento separado no Firestore com `isCollateral: true`
 - Colaterais estão vinculados à solicitação principal via `collateralFor`
-- Antecipação parcial: o `advanceAmount` é menor que o `amount` do recebível
+- **Parcelas da mesma negociação (mesmo PV) NÃO podem ser garantia** de um
+  adiantamento: se o negócio for distratado, título e garantia caem juntos.
+  Aplicado no filtro `validCandidates` do `CollateralModal.tsx`
+- **Antecipação parcial está SUSPENSA** (lançamento 2026-07-30). A modalidade
+  aparece como "Em construção" e não é clicável. O código continua no
+  `CollateralModal.tsx` atrás da constante `PARTIAL_ADVANCE_ENABLED = false`;
+  para reabrir, trocar para `true`. Quando ativa: o `advanceAmount` é menor que
+  o `amount` do recebível e a garantia alocada precisa ser **maior** que o
+  valor adiantado
+- Após a assinatura do contrato, o corretor é avisado de que o **contrato
+  assinado será enviado pelo WhatsApp** (envio manual pelo backoffice — não há
+  integração automática de WhatsApp no portal)
 - O `bitrixDealId` é retornado pelo Bitrix e salvo no Firestore para rastreamento
 
 ## Estado de Saúde

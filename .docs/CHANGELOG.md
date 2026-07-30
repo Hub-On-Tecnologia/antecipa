@@ -6,6 +6,53 @@
 
 ---
 
+## [2026-07-30] — Ajustes de Regra de Negócio para o Lançamento (Parcial Suspenso, Garantia e Contrato via WhatsApp)
+
+**Tipo:** Feature / Fix
+**Arquivos:**
+- `src/components/CollateralModal.tsx` (flag `PARTIAL_ADVANCE_ENABLED`, card "Em construção", filtro de garantia por PV)
+- `src/components/ProposalModal.tsx` (aviso de contrato pelo WhatsApp e fechamento manual da tela de sucesso)
+- `src/components/Dashboard.tsx` (remoção do rótulo "PARCIAL" chutado em registros antigos)
+- `.docs/modules/advancement/README.md` e `.docs/CHANGELOG.md` (este log)
+
+**Por quê:**
+Preparar a aplicação para abertura ao mercado: a modalidade parcial ainda não
+está redonda, a garantia precisava de uma trava de risco e o corretor não sabia
+por onde receberia o contrato assinado.
+
+**Detalhes da Implementação:**
+- **Adiantamento parcial suspenso:** o card PARCIAL vira estado "Em construção"
+  (ícone `Construction`, `disabled`, sem hover). Nada foi apagado — a mecânica
+  de valor personalizado, atalhos de percentual e validação de garantia
+  continua no arquivo, atrás da constante `PARTIAL_ADVANCE_ENABLED = false`.
+  Reabrir a modalidade é trocar uma linha. As assinaturas `'TOTAL' | 'PARCIAL'`
+  do `firebaseService`, `bitrixService` e `Dashboard` ficaram intactas, então
+  solicitações parciais já existentes continuam sendo exibidas e sincronizadas
+  normalmente.
+- **Garantia da mesma negociação bloqueada:** `validCandidates` passou a
+  comparar o **PV** (`r.id !== primaryReceivable.id`) em vez do `receivableId`.
+  Antes, outras parcelas do mesmo PV apareciam como garantia — se o negócio
+  fosse distratado, título e garantia caíam juntos. A regra está explicada na
+  própria tela, acima da lista de títulos.
+- **Contrato pelo WhatsApp:** a tela de sucesso do `ProposalModal` ganhou o
+  aviso "Em breve entraremos em contato pelo WhatsApp para passar o contrato"
+  — sem prometer prazo, porque o envio é manual. Como a tela
+  fechava sozinha em 2 segundos, o fechamento automático foi trocado por um
+  botão "Entendido"; sair pelo X ou pelo fundo também ressincroniza o
+  dashboard (`onSuccess`), comportamento que o timer garantia antes.
+
+**Impacto:**
+- Corretor só consegue solicitar adiantamento TOTAL do saldo disponível.
+- Lista de garantia mostra apenas títulos de outras negociações.
+- Após assinar, o corretor lê (e confirma) o aviso do envio pelo WhatsApp.
+- Nenhuma mudança de schema no Firestore ou de payload no Bitrix.
+
+**Verificação:** `npm run lint` (tsc), `npm test` (58 testes) e `npm run build` — todos OK.
+
+**Decisões tomadas:** parcial fica atrás de feature flag em vez de ser removido, para não quebrar registros e integrações existentes.
+
+---
+
 ## [2026-07-23] — Migração da Base de Colaboradores para MariaDB (DB-API Proxy via WireGuard) & Blindagem de Segurança
 
 **Tipo:** Feature / Security / Config

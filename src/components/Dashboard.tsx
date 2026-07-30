@@ -778,7 +778,8 @@ export default function Dashboard({ userInfo, firebaseUserId, firebaseUserEmail,
                                   >
                                     <div className="flex flex-wrap items-center gap-3">
                                       <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                                        Solicitação #{rIdx + 1} ({req.advanceType || 'PARCIAL'})
+                                        {/* Registros antigos podem não ter advanceType — sem chute de modalidade */}
+                                        Solicitação #{rIdx + 1}{req.advanceType ? ` (${req.advanceType})` : ''}
                                       </span>
                                       <span className={cn("text-[11px] font-mono font-bold", theme === 'dark' ? "text-white" : "text-slate-800")}>
                                         {formatCurrency(reqAmount)}

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, CheckCircle2, ShieldCheck, FileText, Send, Loader2, XCircle, AlertCircle, ArrowRight } from 'lucide-react';
+import { X, CheckCircle2, ShieldCheck, FileText, Send, Loader2, XCircle, AlertCircle, ArrowRight, MessageCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { updateBitrixDealWithFile, rejectBitrixDeal, parseBitrixCurrency } from '../services/bitrixService';
 import { saveSignature, updateCommissionStatus } from '../services/firebaseService';
@@ -225,10 +225,6 @@ DATA/HORA: ${now.toLocaleString('pt-BR')}
       });
 
       setStep('success');
-      setTimeout(() => {
-        onSuccess();
-        onClose();
-      }, 2000);
     } catch (error) {
       console.error('Erro no fluxo de assinatura:', error);
       alert('Erro ao processar assinatura. Tente novamente.');
@@ -257,6 +253,16 @@ DATA/HORA: ${now.toLocaleString('pt-BR')}
     }
   };
 
+  /**
+   * A tela de sucesso não fecha mais sozinha: o corretor precisa ler o aviso
+   * de que o contrato vai chegar pelo WhatsApp. Qualquer saída dessa tela
+   * (botão, X ou clique no fundo) tem que ressincronizar o dashboard.
+   */
+  const dismiss = () => {
+    if (step === 'success') onSuccess();
+    onClose();
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -268,7 +274,7 @@ DATA/HORA: ${now.toLocaleString('pt-BR')}
           "absolute inset-0 transition-opacity duration-300",
           theme === 'dark' ? "bg-black/90 backdrop-blur-md" : "bg-slate-900/30 backdrop-blur-sm"
         )}
-        onClick={step !== 'loading' ? onClose : undefined}
+        onClick={step !== 'loading' ? dismiss : undefined}
       />
       
       <motion.div 
@@ -288,7 +294,7 @@ DATA/HORA: ${now.toLocaleString('pt-BR')}
               <ShieldCheck size={14} className="text-blue-500" /> Confirmação de Proposta
             </h2>
             {step !== 'loading' && (
-              <button onClick={onClose} className={cn("transition-colors cursor-pointer", theme === 'dark' ? "text-white/20 hover:text-white" : "text-slate-400 hover:text-slate-800")}>
+              <button onClick={dismiss} className={cn("transition-colors cursor-pointer", theme === 'dark' ? "text-white/20 hover:text-white" : "text-slate-400 hover:text-slate-800")}>
                 <X size={20} />
               </button>
             )}
@@ -727,12 +733,45 @@ DATA/HORA: ${now.toLocaleString('pt-BR')}
             )}
 
             {step === 'success' && (
-              <div className="py-20 flex flex-col items-center justify-center text-center">
+              <div className="py-12 flex flex-col items-center justify-center text-center">
                 <div className="w-16 h-16 bg-emerald-500/20 text-emerald-500 rounded-full flex items-center justify-center mb-6">
                   <CheckCircle2 size={32} />
                 </div>
                 <h3 className={cn("text-xl font-bold mb-2", theme === 'dark' ? "text-white" : "text-slate-900")}>Proposta de Antecipação Aceita</h3>
                 <p className={cn("text-sm max-w-md mx-auto", theme === 'dark' ? "text-white/60" : "text-slate-600")}>Os termos de autorização foram confirmados com sucesso. O processo de adiantamento seguirá para liberação e acompanhamento.</p>
+
+                <div className={cn(
+                  "mt-8 w-full p-4 sm:p-5 rounded-sm border text-left flex items-start gap-4",
+                  theme === 'dark'
+                    ? "bg-emerald-500/5 border-emerald-500/20"
+                    : "bg-emerald-50 border-emerald-200"
+                )}>
+                  <MessageCircle size={18} className={cn("shrink-0 mt-0.5", theme === 'dark' ? "text-emerald-500" : "text-emerald-600")} />
+                  <div>
+                    <p className={cn(
+                      "text-[10px] font-bold uppercase tracking-widest mb-2",
+                      theme === 'dark' ? "text-emerald-500" : "text-emerald-700"
+                    )}>
+                      Contrato pelo WhatsApp
+                    </p>
+                    <p className={cn(
+                      "text-[11px] leading-relaxed",
+                      theme === 'dark' ? "text-emerald-500/80" : "text-emerald-800 font-medium"
+                    )}>
+                      Em breve entraremos em contato pelo <strong>WhatsApp</strong> para passar o contrato.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={dismiss}
+                  className={cn(
+                    "mt-8 w-full py-4 rounded-sm text-[10px] font-bold uppercase tracking-[0.3em] transition-all cursor-pointer",
+                    theme === 'dark' ? "bg-white text-black hover:bg-white/90" : "bg-slate-950 text-white hover:bg-slate-800"
+                  )}
+                >
+                  Entendido
+                </button>
               </div>
             )}
           </AnimatePresence>
