@@ -477,32 +477,92 @@ app.get("/api/access-tokens/verify-user", dualAuthMiddleware, (req, res) => {
 });
 
 /**
- * POST /api/access-tokens
- * Emissão de token de acesso no servidor com fonte criptográfica.
- * Protegido por dualAuthMiddleware E isUserAllowed (allowlist).
+ * Chave de integração servidor-a-servidor (INTEGRATION_API_KEY).
+ *
+ * Existe para que o backend do app parceiro possa pedir um código de acesso
+ * SEM receber a chave de service account do Firebase. Aquela chave é
+ * administrador total do projeto: leria e escreveria todas as comissões,
+ * todos os CPFs, todos os vínculos, e poderia emitir token de autenticação
+ * se passando por qualquer usuário — além de ignorar as security rules.
+ * Entregá-la a um terceiro para que ele apenas gere um código de 1 minuto
+ * é desproporcional.
+ *
+ * Esta chave permite exatamente UMA operação: emitir código de acesso.
+ * Nenhuma leitura de dado, nenhum acesso ao banco, revogável trocando a
+ * variável de ambiente sem mexer em mais nada.
  */
-app.post("/api/access-tokens", dualAuthMiddleware, async (req, res) => {
-  try {
+function integrationKeyIsValid(recebida: unknown): boolean {
+  const esperada = process.env.INTEGRATION_API_KEY || "";
+  // Falha fechada: sem chave configurada, esta via simplesmente não existe.
+  if (esperada.length < 32) return false;
+  if (typeof recebida !== "string" || recebida.length === 0) return false;
+
+  const a = Buffer.from(recebida);
+  const b = Buffer.from(esperada);
+  // Comparação em tempo constante: comparar com === permitiria descobrir a
+  // chave caractere por caractere medindo o tempo de resposta.
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+// Emissão de código é uma operação privilegiada; limita abuso mesmo com
+// credencial válida (ex.: chave vazada gerando códigos em massa).
+const mintLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Muitas emissões de código. Tente novamente em instantes." },
+  statusCode: 429,
+});
+
+/**
+ * POST /api/access-tokens
+ * Emite um código de acesso de uso único (válido por 1 minuto).
+ *
+ * Duas vias de autorização:
+ * 1. X-Integration-Key — backend do app parceiro (servidor-a-servidor).
+ * 2. Firebase ID Token de conta ADMIN — usado pela tela /gerar-codigo.
+ */
+app.post("/api/access-tokens", mintLimiter, async (req, res) => {
+  const chaveIntegracao = req.headers["x-integration-key"];
+  const viaIntegracao = integrationKeyIsValid(chaveIntegracao);
+
+  let emissor = "integracao";
+  let emissorUid: string | null = null;
+
+  if (!viaIntegracao) {
+    // Sem chave de integração válida: exige admin autenticado.
+    // dualAuthMiddleware é async e, ao negar, responde 401 sem chamar next().
+    // Basta aguardá-lo e checar se a resposta já saiu — encapsular em Promise
+    // que só resolve no next() travaria a requisição no caminho negado.
+    await dualAuthMiddleware(req, res, () => {});
+    if (res.headersSent) return;
+
     const user = (req as any).user as DecodedIdToken | undefined;
     if (!user || !isUserAllowed(user)) {
-      return res.status(403).json({ error: "Acesso negado: Conta não autorizada na allowlist." });
+      return res.status(403).json({ error: "Acesso negado: conta não autorizada." });
     }
+    emissor = "admin";
+    emissorUid = user.uid;
+  }
 
+  try {
     const uuid = crypto.randomUUID().replace(/-/g, "");
     const tokenId = `token_${uuid}`;
 
     const db = firestore();
     await db.collection("access_tokens").doc(tokenId).set({
       createdAt: FieldValue.serverTimestamp(),
-      createdBy: user.uid,
-      createdByEmail: user.email || null,
+      createdBy: emissorUid,
+      createdVia: emissor,
     });
 
-    console.log(`[AccessTokens] Token gerado no servidor: ${tokenId} por ${user.uid}`);
+    console.log(`[AccessTokens] Código emitido via=${emissor} token=${tokenId}`);
     return res.status(200).json({ tokenId });
   } catch (err: any) {
-    console.error("[AccessTokens] Erro ao gerar token de acesso:", err);
-    return res.status(500).json({ error: "Erro interno ao gerar token de acesso." });
+    console.error("[AccessTokens] Erro ao emitir código de acesso:", err);
+    return res.status(500).json({ error: "Erro interno ao emitir código de acesso." });
   }
 });
 

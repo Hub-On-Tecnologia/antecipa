@@ -145,7 +145,22 @@ registrar(
   false,
 );
 
-// --- 5. Token legado (transição do RS-12) ---
+// --- 5. Chave de integração do app parceiro ---
+// Não é fatal: sem ela a tela /gerar-codigo continua funcionando (via admin),
+// apenas a integração servidor-a-servidor do app fica indisponível.
+const integrationKey = process.env.INTEGRATION_API_KEY || "";
+registrar(
+  "INTEGRATION_API_KEY",
+  integrationKey.length >= 32,
+  integrationKey.length === 0
+    ? "ausente — o backend do app não conseguirá emitir códigos (POST /api/access-tokens retornará 401)"
+    : integrationKey.length < 32
+      ? `curta demais (${integrationKey.length} caracteres, mínimo 32) — a via de integração fica desativada`
+      : "definida com tamanho adequado",
+  false,
+);
+
+// --- 6. Token legado (transição do RS-12) ---
 registrar(
   "ACCESS_TOKEN (legado)",
   Boolean(process.env.ACCESS_TOKEN),

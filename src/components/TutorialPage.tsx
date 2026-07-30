@@ -38,128 +38,111 @@ export default function TutorialPage({ theme, toggleTheme }: TutorialPageProps) 
   };
 
   const codeSnippets = {
-    nodejs: `// 1. Instale o SDK do Firebase Admin
-// npm install firebase-admin
+    nodejs: `// Nenhum SDK necessário. Nenhuma credencial do Firebase.
+// Você recebe de nós uma CHAVE DE INTEGRACAO e guarda no seu servidor
+// (variável de ambiente). Ela só serve para pedir um código de acesso.
 
-const admin = require("firebase-admin");
-const crypto = require("crypto");
-
-// Inicialize o SDK (Use as credenciais do seu projeto)
-admin.initializeApp({
-  credential: admin.credential.applicationDefault() // Ou use serviceAccountKey.json
-});
-
-// ATENCAO: este projeto usa um Firestore NOMEADO, nao o banco "(default)".
-// Sem passar o databaseId o SDK aponta para "(default)" e toda gravacao falha
-// com NOT_FOUND.
-const DATABASE_ID = "${import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || '(default)'}";
-const db = admin.firestore(undefined, DATABASE_ID);
+const PORTAL = "${window.location.origin}";
+const CHAVE = process.env.ANTECIPA_INTEGRATION_KEY; // NUNCA no app/cliente
 
 /**
- * Gera um link de acesso temporário e seguro para o Portal Antecipa
- * @returns {Promise<string>} URL de acesso de uso único
+ * Pede um código de acesso de uso único ao Portal Antecipa.
+ * @returns {Promise<string>} URL para carregar na Webview
  */
 async function gerarLinkAcesso() {
-  // 1. Gera um identificador aleatorio CRIPTOGRAFICO.
-  //    Nao use Math.random(): ele e previsivel e um token adivinhavel
-  //    permitiria abrir o portal sem passar pelo app.
-  const token = "token_" + crypto.randomBytes(16).toString("hex");
-  
-  // 2. Registra o token no Firestore com data de criação do servidor
-  const tokenRef = db.collection("access_tokens").doc(token);
-  await tokenRef.set({
-    createdAt: admin.firestore.FieldValue.serverTimestamp()
+  const resposta = await fetch(\`\${PORTAL}/api/access-tokens\`, {
+    method: "POST",
+    headers: { "X-Integration-Key": CHAVE }
   });
 
-  // 3. Monta a URL de redirecionamento do seu Webview
-  const baseUrl = "${window.location.origin}";
-  return \`\${baseUrl}/?token=\${token}\`;
-}`,
-    python: `# 1. Instale o SDK do Firebase Admin
-# pip install firebase-admin
+  if (!resposta.ok) {
+    throw new Error(\`Portal recusou a emissao: HTTP \${resposta.status}\`);
+  }
 
-import firebase_admin
-from firebase_admin import credentials
-from firebase_admin import firestore
-import secrets
+  const { tokenId } = await resposta.json();
+  return \`\${PORTAL}/?token=\${tokenId}\`;
+}
 
-# Inicialize o SDK
-cred = credentials.ApplicationDefault()
-firebase_admin.initialize_app(cred)
+// IMPORTANTE: chame esta funcao a CADA abertura da tela do portal,
+// nao apenas na primeira vez. O codigo vale 1 minuto e e de uso unico.`,
 
-# ATENCAO: este projeto usa um Firestore NOMEADO, nao o banco "(default)".
-# Sem informar o database_id o SDK aponta para "(default)" e toda gravacao
-# falha com NOT_FOUND.
-DATABASE_ID = "${import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || '(default)'}"
-db = firestore.client(database_id=DATABASE_ID)
+    python: `# Nenhum SDK necessario. Nenhuma credencial do Firebase.
+# Voce recebe de nos uma CHAVE DE INTEGRACAO e guarda no seu servidor.
+
+import os
+import requests
+
+PORTAL = "${window.location.origin}"
+CHAVE = os.environ["ANTECIPA_INTEGRATION_KEY"]  # NUNCA no app/cliente
 
 def gerar_link_acesso():
-    # 1. Gera um token aleatório seguro de 16 bytes (hex)
-    token = "token_" + secrets.token_hex(12)
-    
-    # 2. Registra no Firestore com o timestamp do servidor
-    token_ref = db.collection("access_tokens").document(token)
-    token_ref.set({
-        "createdAt": firestore.SERVER_TIMESTAMP
-    })
-    
-    # 3. Retorna a URL para carregar no Webview
-    base_url = "${window.location.origin}"
-    return f"{base_url}/?token={token}"`,
-    php: `<?php
-// 1. Instale a biblioteca do Firestore via Composer
-// composer require google/cloud-firestore
+    """Pede um codigo de acesso de uso unico ao Portal Antecipa."""
+    resposta = requests.post(
+        f"{PORTAL}/api/access-tokens",
+        headers={"X-Integration-Key": CHAVE},
+        timeout=10,
+    )
+    resposta.raise_for_status()
 
-use Google\\Cloud\\Firestore\\FirestoreClient;
-use Google\\Cloud\\Firestore\\FieldValue;
+    token_id = resposta.json()["tokenId"]
+    return f"{PORTAL}/?token={token_id}"
+
+# IMPORTANTE: chame esta funcao a CADA abertura da tela do portal,
+# nao apenas na primeira vez. O codigo vale 1 minuto e e de uso unico.`,
+
+    php: `<?php
+// Nenhum SDK necessario. Nenhuma credencial do Firebase.
+// Voce recebe de nos uma CHAVE DE INTEGRACAO e guarda no seu servidor.
 
 /**
- * Gera o link seguro para abrir a Webview do Portal
+ * Pede um codigo de acesso de uso unico ao Portal Antecipa.
  */
 function gerarLinkAcesso() {
-    // ATENCAO: informe o database — este projeto usa um Firestore NOMEADO,
-    // nao o banco "(default)".
-    $db = new FirestoreClient([
-        'projectId' => '${import.meta.env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0436981001'}',
-        'database' => '${import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || '(default)'}'
+    $portal = "${window.location.origin}";
+    $chave  = getenv('ANTECIPA_INTEGRATION_KEY'); // NUNCA no app/cliente
+
+    $ch = curl_init("$portal/api/access-tokens");
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 10,
+        CURLOPT_HTTPHEADER     => ["X-Integration-Key: $chave"],
     ]);
 
-    // 1. Gera um token aleatório seguro de uso único
-    $token = "token_" . bin2hex(random_bytes(12));
+    $corpo  = curl_exec($ch);
+    $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
 
-    // 2. Grava no Firestore com o timestamp do SERVIDOR.
-    //    Com new DateTime() valeria o relogio da sua maquina: qualquer
-    //    defasagem faz o token nascer expirado ou durar mais de 1 minuto.
-    $tokenRef = $db->collection('access_tokens')->document($token);
-    $tokenRef->set([
-        'createdAt' => FieldValue::serverTimestamp()
-    ]);
+    if ($status !== 200) {
+        throw new Exception("Portal recusou a emissao: HTTP $status");
+    }
 
-    // 3. Monta e retorna o link de acesso seguro
-    $baseUrl = "${window.location.origin}";
-    return $baseUrl . "/?token=" . $token;
-}`,
+    $tokenId = json_decode($corpo, true)['tokenId'];
+    return "$portal/?token=$tokenId";
+}
+
+// IMPORTANTE: chame esta funcao a CADA abertura da tela do portal,
+// nao apenas na primeira vez. O codigo vale 1 minuto e e de uso unico.`,
+
     bitrix: `/*
-  INTEGRAÇÃO VIA FLUXO DE AUTOMAÇÃO NO BITRIX24
-  Você pode automatizar a geração no Bitrix24 usando um webhook de saída 
-  ou um robô de automação (RPA/Business Process) que chama sua própria API:
+  INTEGRACAO VIA FLUXO DE AUTOMACAO NO BITRIX24
 */
 
-1. Crie uma rota na sua API corporativa (ex: /api/gerar-link-portal)
-2. Quando um negócio (Deal) for ganho, faça o Bitrix24 chamar sua API via webhook.
-3. Sua API gera o token seguro via SDK do Firebase (ver abas acima).
-4. Sua API atualiza o campo do Deal no Bitrix24 com o link gerado:
-   
-   POST https://seu-dominio-bitrix.com/rest/crm.deal.update
-   {
-     "id": 12345,
-     "fields": {
-       "UF_CRM_LINK_PORTAL": "https://seu-portal-antecipa.com/?token=token_abc123"
-     }
-   }
+1. Guarde a CHAVE DE INTEGRACAO no seu servidor (nunca no Bitrix, nunca
+   no app, nunca em campo de Deal).
 
-5. No aplicativo mobile ou CRM, ao clicar no botão "Abrir Portal", 
-   basta carregar essa URL de uso único.`
+2. Crie uma rota na sua API corporativa, ex: /api/gerar-link-portal
+   Ela chama o Portal Antecipa conforme os exemplos das abas acima.
+
+3. Quando precisar do link, o Bitrix24 chama a SUA rota via webhook de
+   saida ou robo de automacao (RPA/Business Process).
+
+4. ATENCAO: nao guarde o link em campo de Deal para uso posterior.
+   O codigo expira em 1 minuto e e de uso unico — um link salvo ja
+   estara invalido quando alguem clicar nele.
+
+   Em vez disso, o botao "Abrir Portal" deve chamar a sua rota NO MOMENTO
+   DO CLIQUE e usar o link recem-gerado.`
   };
 
   return (
@@ -272,7 +255,7 @@ function gerarLinkAcesso() {
                 "text-[11px] leading-relaxed",
                 theme === 'dark' ? "text-white/50" : "text-slate-500"
               )}>
-                Seu servidor de backend (fora do cliente) gera uma string aleatória segura (ex: <code>token_A1b2C3d4...</code>).
+Seu servidor chama <code>POST /api/access-tokens</code> com o header <code>X-Integration-Key</code>. <strong>Quem gera o código é o nosso servidor</strong> — você não precisa de SDK, de banco de dados nem de credencial do Firebase.
               </p>
             </div>
 
@@ -282,13 +265,13 @@ function gerarLinkAcesso() {
             )}>
               <div className="flex items-center gap-2.5 text-xs font-semibold">
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500 text-[10px] font-bold">2</span>
-                <span>Registro no Banco Firestore</span>
+                <span>Resposta com o Código</span>
               </div>
               <p className={cn(
                 "text-[11px] leading-relaxed",
                 theme === 'dark' ? "text-white/50" : "text-slate-500"
               )}>
-                O servidor registra essa chave no documento <code>access_tokens/&#123;token_id&#125;</code> com o campo <code>createdAt</code> preenchido com a data do servidor do Firebase.
+                Respondemos <code>&#123; "tokenId": "token_..." &#125;</code>. O registro e a expiração ficam do nosso lado — nada disso é responsabilidade sua.
               </p>
             </div>
 
@@ -369,7 +352,7 @@ function gerarLinkAcesso() {
               "text-[11px] leading-relaxed",
               theme === 'dark' ? "text-white/60" : "text-slate-600"
                 )}>
-              Pergunte ao seu desenvolvedor se ele já possui o Firebase configurado em outro sistema. Se sim, ele só precisará adicionar uma função no servidor dele para inserir o código. O portal tratará de deletar e autenticar!
+              A integração é uma única chamada HTTP autenticada por um header. Não pedimos — e você não deve aceitar — nenhuma credencial de banco de dados ou do Firebase: a chave de integração permite <strong>apenas emitir códigos de acesso</strong>, e é revogável a qualquer momento sem afetar o resto do sistema.
             </p>
           </div>
         </div>
@@ -470,23 +453,30 @@ function gerarLinkAcesso() {
           )}>
             <h2 className="text-sm font-semibold uppercase tracking-wider mb-3 flex items-center gap-2">
               <Terminal size={14} className="text-emerald-500" />
-              <span>Regras de Segurança do Firebase</span>
+              <span>Contrato da API</span>
             </h2>
             <p className={cn(
               "text-xs leading-relaxed mb-4",
               theme === 'dark' ? "text-white/50" : "text-slate-500"
             )}>
-              Para segurança máxima e conformidade, o cliente web não possui nenhuma permissão direta sobre a coleção <code>access_tokens</code>. As regras de segurança do seu Firestore (<code>firestore.rules</code>) negam todo o acesso do cliente, pois o ciclo de vida é gerenciado exclusivamente via servidor / Firebase Admin SDK ou endpoint <code>POST /api/access-tokens</code>:
+              Um único endpoint. A chave vai no header, sempre a partir do seu <strong>servidor</strong> — nunca do app ou do navegador, onde ela ficaria exposta.
             </p>
 
             <pre className={cn(
               "p-4 rounded-sm font-mono text-[10px] leading-relaxed overflow-x-auto",
               theme === 'dark' ? "bg-black/40 text-emerald-400/80 border border-white/5" : "bg-slate-50 text-emerald-700 border border-slate-100"
             )}>
-{`match /access_tokens/{tokenId} {
-  // Nega todo o acesso direto do cliente (Admin SDK ignora as regras no servidor)
-  allow get, list, create, update, delete: if false;
-}`}
+{`POST ${window.location.origin}/api/access-tokens
+X-Integration-Key: <sua-chave-de-integracao>
+
+200 OK
+{ "tokenId": "token_a1b2c3..." }
+
+401  chave ausente ou invalida
+429  limite de emissoes excedido (30/min)
+
+Depois: abra ${window.location.origin}/?token=<tokenId>
+Validade: 1 minuto, uso unico.`}
             </pre>
           </div>
 
@@ -500,11 +490,11 @@ function gerarLinkAcesso() {
               <ul className="space-y-2 text-xs">
                 <li className="flex items-center gap-2">
                   <Check size={14} className="text-emerald-500" />
-                  <span className={theme === 'dark' ? "text-white/70" : "text-slate-600"}>Possuir conta ativa no Firebase Console.</span>
+                  <span className={theme === 'dark' ? "text-white/70" : "text-slate-600"}>Receber a chave de integração (solicite ao responsável).</span>
                 </li>
                 <li className="flex items-center gap-2">
                   <Check size={14} className="text-emerald-500" />
-                  <span className={theme === 'dark' ? "text-white/70" : "text-slate-600"}>Chave JSON do Service Account do Firebase.</span>
+                  <span className={theme === 'dark' ? "text-white/70" : "text-slate-600"}>Um endpoint no seu servidor que faça a chamada e guarde a chave.</span>
                 </li>
                 <li className="flex items-center gap-2">
                   <Check size={14} className="text-emerald-500" />
