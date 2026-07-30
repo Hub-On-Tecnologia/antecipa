@@ -22,6 +22,27 @@ import {
 // Load environment variables
 dotenv.config();
 
+/**
+ * Rede de segurança contra rejeição de Promise não tratada.
+ *
+ * Desde o Node 15, uma rejeição não tratada DERRUBA o processo por padrão —
+ * mesmo com try/catch em cada rota, uma falha assíncrona que escape do
+ * fluxo esperado (ex.: retry interno de uma biblioteca de banco de dados
+ * rejeitando fora do await da aplicação) mata o servidor inteiro por causa
+ * de UMA falha pontual. Observado em produção em 2026-07-30: um erro
+ * transitório do Firestore (banco em cota compartilhada) derrubou o
+ * processo; o PM2 reiniciou sozinho, mas toda requisição em andamento
+ * naquele instante foi perdida.
+ *
+ * Logar sem encerrar troca "servidor inteiro cai por uma falha pontual" por
+ * "uma requisição falha, as outras continuam". uncaughtException continua
+ * fatal de propósito — nesse caso o estado do processo é indefinido demais
+ * para confiar, e é papel do PM2 reiniciar (autorestart: true).
+ */
+process.on("unhandledRejection", (reason: any) => {
+  console.error("[Server] Rejeição não tratada (processo continua):", reason?.message || reason);
+});
+
 // Initialize Firebase Admin SDK for server-side JWT verification (RS-03)
 function initFirebaseAdmin(): App | null {
   if (getApps().length > 0) return getApp();
