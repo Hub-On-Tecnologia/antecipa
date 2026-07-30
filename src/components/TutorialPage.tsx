@@ -281,60 +281,130 @@ Seu servidor chama <code>POST /api/access-tokens</code> com o header <code>X-Int
             )}>
               <div className="flex items-center gap-2.5 text-xs font-semibold">
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500 text-[10px] font-bold">3</span>
-                <span>Entrada no Webview (Uso Único)</span>
+                <span>Abertura em Custom Tab (Uso Único)</span>
               </div>
               <p className={cn(
                 "text-[11px] leading-relaxed",
                 theme === 'dark' ? "text-white/50" : "text-slate-500"
               )}>
-                Ao carregar a URL com o parâmetro <code>?token=...</code>, o Portal valida o tempo decorrido (máx 1 minuto) e <strong>deleta o registro imediatamente</strong>. <strong>Não existe sessão persistente</strong>: qualquer recarga da tela do portal exige um token novo. Seu app deve chamar <code>gerarLinkAcesso()</code> toda vez que abrir ou recarregar essa tela — não apenas na primeira vez.
+                O app abre a URL em <strong>Custom Tab / SFSafariViewController</strong> — nunca em Webview pura (ver requisito
+                abaixo). O Portal valida o tempo decorrido (máx 1 minuto) e <strong>deleta o registro imediatamente</strong>.
+                <strong> Não existe sessão persistente</strong>: qualquer reabertura da tela exige um código novo. Chame
+                <code> gerarLinkAcesso()</code> toda vez, não apenas na primeira.
               </p>
             </div>
           </div>
 
-          {/* Avisos críticos de integração */}
+          {/* Requisito obrigatório — Custom Tab */}
+          <div className={cn(
+            "p-5 rounded-sm border space-y-4",
+            theme === 'dark' ? "bg-red-500/[0.04] border-red-500/30" : "bg-red-50 border-red-200"
+          )}>
+            <h4 className="text-xs font-bold text-red-500 uppercase tracking-wider flex items-center gap-2">
+              <ShieldCheck size={12} />
+              <span>Obrigatório — NÃO use Webview pura</span>
+            </h4>
+
+            <p className={cn(
+              "text-[11px] leading-relaxed",
+              theme === 'dark' ? "text-white/70" : "text-slate-600"
+            )}>
+              Isto não é recomendação: <strong>testamos e confirmamos</strong> em app Capacitor com dispositivo Android real. O portal
+              <strong> não funciona</strong> dentro de <code>android.webkit.WebView</code> ou <code>WKWebView</code> puros.
+            </p>
+
+            <div className="space-y-1.5">
+              <p className={cn("text-[11px] font-semibold", theme === 'dark' ? "text-white/80" : "text-slate-700")}>
+                Por que falha
+              </p>
+              <p className={cn(
+                "text-[11px] leading-relaxed",
+                theme === 'dark' ? "text-white/50" : "text-slate-500"
+              )}>
+                São dois motivos somados. O login usa <code>signInWithPopup</code> do Firebase, que precisa abrir uma janela — e
+                Webview não suporta múltiplas janelas, então a tela fica em branco ou o sistema chuta para o navegador externo.
+                Além disso, o Google bloqueia OAuth em Webview genérica por política anti-phishing, porque o usuário não consegue
+                ver em que site está digitando a senha.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <p className={cn("text-[11px] font-semibold", theme === 'dark' ? "text-white/80" : "text-slate-700")}>
+                O que usar — testado e funcionando
+              </p>
+              <ul className={cn(
+                "text-[11px] leading-relaxed list-disc list-inside space-y-1",
+                theme === 'dark' ? "text-white/50" : "text-slate-500"
+              )}>
+                <li><strong>Android:</strong> <code>CustomTabsIntent</code> (androidx.browser)</li>
+                <li><strong>iOS:</strong> <code>SFSafariViewController</code> (SafariServices)</li>
+                <li><strong>Capacitor/Ionic:</strong> <code>@capacitor/browser</code> → <code>Browser.open()</code></li>
+              </ul>
+            </div>
+
+            <div className="space-y-1.5">
+              <p className={cn("text-[11px] font-semibold", theme === 'dark' ? "text-white/80" : "text-slate-700")}>
+                Sobre a barra de endereço
+              </p>
+              <p className={cn(
+                "text-[11px] leading-relaxed",
+                theme === 'dark' ? "text-white/50" : "text-slate-500"
+              )}>
+                O Custom Tab mostra o domínio e <strong>isso não pode ser escondido</strong> — é justamente o que faz o Google
+                aceitar o login ali. Dá para colorir a barra com a identidade do app (<code>toolbarColor</code> no Android,
+                <code> preferredBarTintColor</code> no iOS). Não há risco em exibir a URL: o código já foi consumido e apagado do
+                endereço antes de a tela aparecer.
+              </p>
+            </div>
+          </div>
+
+          {/* Demais pontos de atenção */}
           <div className={cn(
             "p-5 rounded-sm border space-y-4",
             theme === 'dark' ? "bg-amber-500/[0.03] border-amber-500/20" : "bg-amber-50 border-amber-200"
           )}>
             <h4 className="text-xs font-bold text-amber-500 uppercase tracking-wider flex items-center gap-2">
               <ShieldCheck size={12} />
-              <span>Teste isto antes de finalizar a integração</span>
+              <span>Outros pontos de atenção</span>
             </h4>
 
             <div className="space-y-1.5">
               <p className={cn("text-[11px] font-semibold", theme === 'dark' ? "text-white/80" : "text-slate-700")}>
-                1. Login do Google dentro da sua Webview
+                Código novo a cada abertura da tela
               </p>
               <p className={cn(
                 "text-[11px] leading-relaxed",
                 theme === 'dark' ? "text-white/50" : "text-slate-500"
               )}>
-                O corretor faz login com a conta Google <strong>dentro</strong> da tela do portal. Por política própria do Google (anti-phishing), esse login pode ser <strong>bloqueado</strong> se o Google detectar uma Webview genérica embutida (Android <code>WebView</code> / iOS <code>WKWebView</code> puros) — o corretor veria algo como "Este navegador ou app pode não ser seguro", mesmo com o portal funcionando corretamente. Teste esse passo cedo. Se travar, abra essa etapa numa <strong>Custom Tab</strong> (Android) ou <strong>SFSafariViewController</strong> (iOS) em vez da Webview pura.
+                Não existe sessão de longa duração no servidor. Se o app reabrir a tela do portal — inclusive ao voltar de segundo
+                plano — carregando uma URL já usada, o corretor será bloqueado. Chame a emissão toda vez.
               </p>
             </div>
 
             <div className="space-y-1.5">
               <p className={cn("text-[11px] font-semibold", theme === 'dark' ? "text-white/80" : "text-slate-700")}>
-                2. Token novo a cada abertura da tela
+                A chave de integração fica no servidor
               </p>
               <p className={cn(
                 "text-[11px] leading-relaxed",
                 theme === 'dark' ? "text-white/50" : "text-slate-500"
               )}>
-                Não existe sessão de longa duração no servidor. Se o app reabrir a tela do portal (inclusive após voltar de segundo plano) carregando a mesma URL já usada, o corretor será bloqueado. Gere um link novo toda vez.
+                Nunca embuta a chave no aplicativo nem em código que roda no dispositivo: qualquer pessoa consegue extrair strings
+                de um APK. O app pede o link ao <strong>seu backend</strong>, e é o backend que guarda a chave e chama nossa API.
               </p>
             </div>
 
             <div className="space-y-1.5">
               <p className={cn("text-[11px] font-semibold", theme === 'dark' ? "text-white/80" : "text-slate-700")}>
-                3. Próxima fase: App Check (ainda não obrigatório)
+                Possível evolução futura: App Check
               </p>
               <p className={cn(
                 "text-[11px] leading-relaxed",
                 theme === 'dark' ? "text-white/50" : "text-slate-500"
               )}>
-                Vamos exigir futuramente o Firebase App Check (Play Integrity no Android, App Attest no iOS) para atestar que o acesso vem do app genuíno. Não é necessário hoje, mas evite decisões de arquitetura na Webview que dificultem adicionar isso depois.
+                Poderemos adotar o Firebase App Check (Play Integrity no Android, App Attest no iOS) para atestar
+                criptograficamente que o acesso vem do app genuíno. Não é exigido hoje e não bloqueia a entrega — mas evite
+                decisões de arquitetura que dificultem incluí-lo depois.
               </p>
             </div>
           </div>
@@ -498,7 +568,7 @@ Validade: 1 minuto, uso unico.`}
                 </li>
                 <li className="flex items-center gap-2">
                   <Check size={14} className="text-emerald-500" />
-                  <span className={theme === 'dark' ? "text-white/70" : "text-slate-600"}>Configurar o Webview do App com a URL do portal.</span>
+                  <span className={theme === 'dark' ? "text-white/70" : "text-slate-600"}>Abrir o portal em <strong>Custom Tab / SFSafariViewController</strong> — nunca Webview.</span>
                 </li>
               </ul>
             </div>
@@ -520,7 +590,7 @@ Validade: 1 minuto, uso unico.`}
                 </li>
                 <li className="flex items-center gap-2">
                   <Check size={14} className="text-emerald-500" />
-                  <span className={theme === 'dark' ? "text-white/70" : "text-slate-600"}><strong>Teste o login Google dentro da sua Webview real</strong>, não só no navegador do computador.</span>
+                  <span className={theme === 'dark' ? "text-white/70" : "text-slate-600"}><strong>Teste o login Google em dispositivo real</strong>, não só no navegador do computador.</span>
                 </li>
                 <li className="flex items-center gap-2">
                   <Check size={14} className="text-emerald-500" />
