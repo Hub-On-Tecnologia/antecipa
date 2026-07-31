@@ -439,7 +439,9 @@ app.post("/api/auth/bind", bindLimiter, dualAuthMiddleware, async (req, res) => 
     const resultado = await db.runTransaction<{ ok: boolean; erro?: string }>(async (tx) => {
       const jaVinculado = await tx.get(corretorRef);
       if (jaVinculado.exists && jaVinculado.data()?.uid !== user.uid) {
-        return { ok: false, erro: "Este corretor já está vinculado a outra conta Google." };
+        // Sem "Google" na mensagem: o acesso do corretor não usa mais Google,
+        // e citá-lo mandaria a pessoa procurar um botão que não existe.
+        return { ok: false, erro: "Este corretor já está vinculado a outra conta." };
       }
 
       tx.set(corretorRef, { uid: user.uid, boundAt: FieldValue.serverTimestamp() });
@@ -654,6 +656,32 @@ async function prepararCredencial(cpfNormalizado: string): Promise<{ uid: string
  * O vínculo é fechado em POST /api/auth/ativar-vinculo, no primeiro login com
  * senha — usando a identidade que JÁ foi conferida aqui contra o MariaDB.
  */
+/**
+ * Move os registros do corretor de uma credencial para outra.
+ *
+ * Sem isso, quem migrava do Google para a senha perdia de vista as próprias
+ * solicitações: os documentos guardam `userId`, e tanto as regras do Firestore
+ * quanto as consultas do dashboard filtram por ele.
+ */
+async function migrarRegistros(uidAntigo: string, uidNovo: string): Promise<number> {
+  const db = firestore();
+  let total = 0;
+
+  for (const colecao of ["promised_commissions", "notifications"]) {
+    const snap = await db.collection(colecao).where("userId", "==", uidAntigo).get();
+    if (snap.empty) continue;
+
+    const lote = db.batch();
+    // Só o dono muda. Mexer em updatedAt faria a sincronização com o Bitrix
+    // enxergar alteração onde não houve.
+    snap.docs.forEach((d) => lote.update(d.ref, { userId: uidNovo }));
+    await lote.commit();
+    total += snap.size;
+  }
+
+  return total;
+}
+
 async function registrarPendencia(uid: string, cpfNormalizado: string, nome: string) {
   await firestore().collection("registro_pendente").doc(uid).set({
     cpf: cpfNormalizado,
@@ -815,11 +843,25 @@ app.post("/api/auth/ativar-vinculo", dualAuthMiddleware, async (req, res) => {
     const corretorRef = db.collection("corretor_bindings").doc(alvoCpf);
     const userRef = db.collection("user_bindings").doc(user.uid);
 
-    const resultado = await db.runTransaction<{ ok: boolean; erro?: string }>(async (tx) => {
+    /**
+     * Transferência de credencial.
+     *
+     * Se o CPF já estiver vinculado a outra conta — o caso de quem entrava
+     * pelo Google antes —, o vínculo é transferido em vez de recusado. A
+     * pendência que chegou até aqui exigiu nome, nascimento e CPF conferidos
+     * contra o MariaDB E posse do e-mail do cadastro, já que a senha só pode
+     * ter sido criada pelo link enviado para lá. O vínculo antigo nasceu
+     * apenas com os três primeiros. Prova mais forte assume o lugar da fraca.
+     */
+    const resultado = await db.runTransaction<{ uidAnterior: string | null }>(async (tx) => {
       const conflito = await tx.get(corretorRef);
-      if (conflito.exists && conflito.data()?.uid !== user.uid) {
-        return { ok: false, erro: "Este corretor já está vinculado a outra conta." };
+      const uidAnterior = conflito.exists ? String(conflito.data()?.uid || "") : "";
+      const houveTroca = Boolean(uidAnterior) && uidAnterior !== user.uid;
+
+      if (houveTroca) {
+        tx.delete(db.collection("user_bindings").doc(uidAnterior));
       }
+
       tx.set(corretorRef, { uid: user.uid, boundAt: FieldValue.serverTimestamp() });
       tx.set(userRef, {
         cpf: alvoCpf,
@@ -828,12 +870,17 @@ app.post("/api/auth/ativar-vinculo", dualAuthMiddleware, async (req, res) => {
         boundAt: FieldValue.serverTimestamp(),
       });
       tx.delete(pendenteSnap.ref);
-      return { ok: true };
+
+      return { uidAnterior: houveTroca ? uidAnterior : null };
     });
 
-    if (!resultado.ok) {
-      console.warn(`[AuthSenha] Vínculo em conflito uid=${user.uid}`);
-      return res.status(409).json({ error: resultado.erro });
+    if (resultado.uidAnterior) {
+      const movidos = await migrarRegistros(resultado.uidAnterior, user.uid);
+      // Evento de auditoria: uma conta perdeu o acesso ao corretor e outra
+      // ganhou. Precisa ficar registrado de forma legível.
+      console.warn(
+        `[AuthSenha] CREDENCIAL TRANSFERIDA cpf=${maskCpf(alvoCpf)} de=${resultado.uidAnterior} para=${user.uid} registros=${movidos}`,
+      );
     }
 
     console.log(`[AuthSenha] Vínculo criado por senha uid=${user.uid} cpf=${maskCpf(alvoCpf)}`);
