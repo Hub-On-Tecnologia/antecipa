@@ -121,5 +121,12 @@ service cloud.firestore {
     match /corretor_bindings/{cpf} {
       allow get, list, create, update, delete: if false;
     }
+
+    // Cadastro por senha aguardando o primeiro login. Guarda CPF e nome já
+    // conferidos contra o MariaDB — se o cliente pudesse escrever aqui,
+    // qualquer um se declararia qualquer corretor no ativar-vinculo.
+    match /registro_pendente/{uid} {
+      allow get, list, create, update, delete: if false;
+    }
   }
 }

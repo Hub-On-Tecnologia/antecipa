@@ -59,6 +59,31 @@ export function cpfDaLinha(row: Record<string, any>): string {
   return String(row?.cpf ?? row?.CPF ?? row?.cpf_cnpj ?? row?.cpfcnpj ?? row?.documento ?? '');
 }
 
+/** Domínio do identificador sintético. Não recebe e-mail de verdade. */
+export const DOMINIO_CORRETOR = 'corretor.antecipa.com.br';
+
+/**
+ * Identificador da credencial no Firebase, derivado do CPF.
+ *
+ * O Firebase exige um e-mail como identificador de login por senha, mas pedir
+ * o e-mail ao corretor traz três problemas: a base tem TRÊS campos de e-mail
+ * (`email`, `email_contato`, `email_social`) e ele não saberia qual usar;
+ * consultar "qual o e-mail deste CPF" no servidor criaria um oráculo de
+ * enumeração; e 3 dos 91 corretores ativos não têm e-mail nenhum.
+ *
+ * Com o identificador derivado do CPF, o corretor entra com CPF + senha e o
+ * front monta este endereço sozinho, sem perguntar nada ao servidor. O e-mail
+ * de verdade fica só como canal de entrega, guardado no vínculo.
+ *
+ * Devolve string vazia para CPF inválido — quem chama decide o que fazer,
+ * em vez de receber um identificador que casaria com qualquer coisa.
+ */
+export function emailSinteticoDoCpf(cpf: string, dominio: string = DOMINIO_CORRETOR): string {
+  const limpo = normalizeCPF(String(cpf ?? ''));
+  if (!limpo || limpo.length !== 11 || /^0+$/.test(limpo)) return '';
+  return `${limpo}@${dominio}`;
+}
+
 /** Lê o nome cobrindo as variações de nome de coluna. */
 export function nomeDaLinha(row: Record<string, any>): string {
   return String(row?.nome ?? row?.NOME ?? row?.nome_corretor ?? '');

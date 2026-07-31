@@ -6,6 +6,8 @@ import {
   matchCorretor,
   acharPorCpf,
   mapCorretor,
+  emailSinteticoDoCpf,
+  DOMINIO_CORRETOR,
 } from './identity';
 
 /** Linha típica do MariaDB, com os nomes de coluna reais da base. */
@@ -193,5 +195,40 @@ describe('mapCorretor — só o necessário vai para a interface', () => {
     expect(c.nome).toBe('Maria');
     expect(c.empresa).toBe('X');
     expect(c.cpf).toBe('***.***.***-00');
+  });
+});
+
+describe('emailSinteticoDoCpf — identificador de login por CPF', () => {
+  it('deriva o identificador do CPF limpo', () => {
+    expect(emailSinteticoDoCpf('12345678909')).toBe(`12345678909@${DOMINIO_CORRETOR}`);
+  });
+
+  it('ignora a formatação: pontuado e limpo geram o MESMO identificador', () => {
+    // Se divergissem, o corretor criaria a senha por um caminho e não
+    // conseguiria entrar pelo outro.
+    expect(emailSinteticoDoCpf('123.456.789-09')).toBe(emailSinteticoDoCpf('12345678909'));
+  });
+
+  it('completa com zeros à esquerda, igual ao resto do sistema', () => {
+    // A base guarda CPF como número em alguns registros, perdendo o zero.
+    expect(emailSinteticoDoCpf('1234567890')).toBe(`01234567890@${DOMINIO_CORRETOR}`);
+  });
+
+  it('aceita domínio customizado', () => {
+    expect(emailSinteticoDoCpf('12345678909', 'x.dev')).toBe('12345678909@x.dev');
+  });
+
+  it('devolve vazio para entrada inválida em vez de identificador que casa com qualquer um', () => {
+    expect(emailSinteticoDoCpf('')).toBe('');
+    expect(emailSinteticoDoCpf('abc')).toBe('');
+    expect(emailSinteticoDoCpf('00000000000')).toBe('');
+    expect(emailSinteticoDoCpf(null as any)).toBe('');
+    expect(emailSinteticoDoCpf(undefined as any)).toBe('');
+  });
+
+  it('não vaza o CPF em domínio que receba e-mail de verdade', () => {
+    // O domínio é só identificador interno do Firebase; se apontasse para um
+    // servidor de e-mail real, o CPF viraria endereço público.
+    expect(DOMINIO_CORRETOR).toBe('corretor.antecipa.com.br');
   });
 });

@@ -16,6 +16,7 @@ import { normalizeCPF } from "./src/lib/utils";
 // poder ser testada sem subir o servidor.
 import {
   isUserAllowed, maskCpf, cpfDaLinha, mapCorretor, matchCorretor, acharPorCpf,
+  emailSinteticoDoCpf, DOMINIO_CORRETOR,
   TokenIdentidade,
 } from "./src/lib/identity";
 
@@ -459,6 +460,265 @@ app.post("/api/auth/bind", bindLimiter, dualAuthMiddleware, async (req, res) => 
   } catch (err: any) {
     console.error("[Auth] Erro na vinculação:", err.message);
     return res.status(500).json({ error: "Erro ao validar seus dados. Tente novamente." });
+  }
+});
+
+/* ------------------------------------------------------------------------- *
+ * AUTENTICAÇÃO POR SENHA — Task 3 do .docs/PLANO_AUTH_EMAIL_SENHA.md
+ *
+ * O corretor NUNCA informa o e-mail dele. Ele prova quem é com nome +
+ * nascimento + CPF (a mesma conferência do /api/auth/bind, já testada) e o
+ * link de definição de senha é enviado para o contato QUE JÁ ESTÁ NA BASE.
+ * Isso cria um fator de posse que o fluxo Google não tem: hoje, quem souber
+ * esses três dados vincula qualquer conta a qualquer corretor.
+ *
+ * O identificador da credencial é derivado do CPF (emailSinteticoDoCpf), então
+ * o corretor entra com CPF + senha e o front monta o identificador sozinho,
+ * sem consultar o servidor — não existe oráculo de enumeração.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Interruptor geral. Enquanto estiver desligado, os endpoints respondem 503 e
+ * nada é criado. Permite subir o código para a VPS antes de o provedor
+ * E-mail/senha estar habilitado no Console do Firebase (Task 2), mantendo a
+ * disciplina de um commit por passo sem expor um fluxo pela metade.
+ */
+const AUTH_SENHA_ATIVA = String(process.env.AUTH_SENHA_ENABLED || "").trim() === "1";
+
+/** Domínio do identificador sintético — não recebe e-mail de verdade. */
+const DOMINIO_CREDENCIAL = process.env.AUTH_CORRETOR_EMAIL_DOMAIN || DOMINIO_CORRETOR;
+
+/**
+ * Imprime o link de ativação no log do servidor. Padrão DESLIGADO: link de
+ * definição de senha é credencial, e o PRD proíbe segredo em log (item 9).
+ * Existe só para o piloto, antes de a entrega por WhatsApp ficar pronta.
+ */
+const LOG_LINK_ATIVACAO = String(process.env.AUTH_LINK_DEBUG || "").trim() === "1";
+
+/**
+ * Resposta única, dados conferindo ou não. Se variasse, o endpoint viraria um
+ * consultor de CPF: "este CPF é corretor ativo da Antecipa?".
+ */
+const RESPOSTA_GENERICA = {
+  ok: true,
+  message: "Se os dados conferirem com um corretor ativo, enviamos um link para o contato cadastrado.",
+};
+
+// Mesmo aperto do bindLimiter: são endpoints públicos que consultam a base de
+// corretores e disparam envio. Bem abaixo do que uma pessoa real precisa.
+const senhaLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Muitas tentativas. Aguarde alguns minutos." },
+  statusCode: 429,
+});
+
+/**
+ * Garante que exista uma credencial no Firebase para aquele CPF e devolve o
+ * link de definição de senha.
+ *
+ * A senha inicial é aleatória e nunca sai daqui: quem define a senha de
+ * verdade é o corretor, pelo link. Criar sem senha alguma impediria gerar o
+ * link de redefinição depois.
+ */
+async function prepararCredencial(cpfNormalizado: string): Promise<{ uid: string; link: string } | null> {
+  const identificador = emailSinteticoDoCpf(cpfNormalizado, DOMINIO_CREDENCIAL);
+  if (!identificador) return null;
+
+  const auth = getAuth();
+  let uid: string;
+
+  try {
+    const existente = await auth.getUserByEmail(identificador);
+    uid = existente.uid;
+  } catch (err: any) {
+    if (err?.code !== "auth/user-not-found") throw err;
+    const criado = await auth.createUser({
+      email: identificador,
+      emailVerified: false,
+      password: crypto.randomBytes(32).toString("base64url"),
+    });
+    uid = criado.uid;
+    console.log(`[AuthSenha] Credencial criada uid=${uid} cpf=${maskCpf(cpfNormalizado)}`);
+  }
+
+  const link = await auth.generatePasswordResetLink(identificador);
+  return { uid, link };
+}
+
+/**
+ * Registra a intenção de ativação. O vínculo corretor<->conta NÃO é criado
+ * aqui de propósito: enquanto o login Google segue ligado, criar o vínculo
+ * antes de o corretor definir a senha ocuparia o CPF e faria o fluxo antigo
+ * responder 409 para quem ainda usa o Google.
+ *
+ * O vínculo é fechado em POST /api/auth/ativar-vinculo, no primeiro login com
+ * senha — usando a identidade que JÁ foi conferida aqui contra o MariaDB.
+ */
+async function registrarPendencia(uid: string, cpfNormalizado: string, nome: string) {
+  await firestore().collection("registro_pendente").doc(uid).set({
+    cpf: cpfNormalizado,
+    nome,
+    criadoEm: FieldValue.serverTimestamp(),
+  });
+}
+
+/**
+ * POST /api/auth/register-request
+ * Primeiro acesso. Público, com rate limit e resposta sempre genérica.
+ */
+app.post("/api/auth/register-request", senhaLimiter, async (req, res) => {
+  if (!AUTH_SENHA_ATIVA) {
+    return res.status(503).json({ error: "Cadastro por senha ainda não está disponível." });
+  }
+
+  const { nome, dataNascimento, cpf } = req.body || {};
+  if (!nome || !dataNascimento || !cpf) {
+    return res.status(400).json({ error: "Informe nome, data de nascimento e CPF." });
+  }
+
+  try {
+    const rows = await fetchCorretoresAtivos();
+    const encontrado = rows.find((row: any) => matchCorretor(row, { nome, dataNascimento, cpf }));
+
+    // Dados não conferem: mesma resposta do caminho feliz, mesmo custo de
+    // consulta ao banco. Só o log sabe a diferença.
+    if (!encontrado) {
+      console.warn(`[AuthSenha] Cadastro negado cpf=${maskCpf(String(cpf))} ip=${req.ip}`);
+      return res.status(200).json(RESPOSTA_GENERICA);
+    }
+
+    const alvoCpf = normalizeCPF(String(cpf));
+    const preparada = await prepararCredencial(alvoCpf);
+    if (!preparada) {
+      console.warn(`[AuthSenha] CPF inválido para identificador ip=${req.ip}`);
+      return res.status(200).json(RESPOSTA_GENERICA);
+    }
+
+    const nomeBase = String(encontrado.nome || encontrado.NOME || encontrado.nome_corretor || "");
+    await registrarPendencia(preparada.uid, alvoCpf, nomeBase);
+
+    // Task 4 substitui este ponto pelo envio ao contato cadastrado.
+    console.log(`[AuthSenha] Link de ativação gerado cpf=${maskCpf(alvoCpf)} uid=${preparada.uid}`);
+    if (LOG_LINK_ATIVACAO) console.log(`[AuthSenha][DEBUG] ${preparada.link}`);
+
+    return res.status(200).json(RESPOSTA_GENERICA);
+  } catch (err: any) {
+    console.error("[AuthSenha] Erro no cadastro:", err.message);
+    return res.status(500).json({ error: "Erro ao processar a solicitação. Tente novamente." });
+  }
+});
+
+/**
+ * POST /api/auth/reset-request
+ * Recuperação de senha. Só o CPF é pedido; o destino sai da base, nunca da tela.
+ */
+app.post("/api/auth/reset-request", senhaLimiter, async (req, res) => {
+  if (!AUTH_SENHA_ATIVA) {
+    return res.status(503).json({ error: "Recuperação de senha ainda não está disponível." });
+  }
+
+  const { cpf } = req.body || {};
+  if (!cpf) return res.status(400).json({ error: "Informe o CPF." });
+
+  try {
+    const alvoCpf = normalizeCPF(String(cpf));
+    const rows = await fetchCorretoresAtivos();
+
+    // Corretor precisa estar ATIVO: desligado no CRM não recupera acesso.
+    if (!acharPorCpf(rows, alvoCpf)) {
+      console.warn(`[AuthSenha] Reset negado cpf=${maskCpf(String(cpf))} ip=${req.ip}`);
+      return res.status(200).json(RESPOSTA_GENERICA);
+    }
+
+    const identificador = emailSinteticoDoCpf(alvoCpf, DOMINIO_CREDENCIAL);
+    if (!identificador) return res.status(200).json(RESPOSTA_GENERICA);
+
+    try {
+      const link = await getAuth().generatePasswordResetLink(identificador);
+      console.log(`[AuthSenha] Link de recuperação gerado cpf=${maskCpf(alvoCpf)}`);
+      if (LOG_LINK_ATIVACAO) console.log(`[AuthSenha][DEBUG] ${link}`);
+    } catch (err: any) {
+      // Corretor ativo que nunca se cadastrou cai aqui. Não é erro: a resposta
+      // genérica já não revela se a conta existe.
+      if (err?.code !== "auth/user-not-found") throw err;
+      console.warn(`[AuthSenha] Reset para conta inexistente cpf=${maskCpf(alvoCpf)}`);
+    }
+
+    return res.status(200).json(RESPOSTA_GENERICA);
+  } catch (err: any) {
+    console.error("[AuthSenha] Erro na recuperação:", err.message);
+    return res.status(500).json({ error: "Erro ao processar a solicitação. Tente novamente." });
+  }
+});
+
+/**
+ * POST /api/auth/ativar-vinculo
+ * Fecha o vínculo no primeiro login com senha, sem pedir os dados de novo.
+ *
+ * Exige autenticação: só quem já provou posse do link (definiu a senha e
+ * entrou) chega aqui. A identidade em si foi conferida no register-request.
+ */
+app.post("/api/auth/ativar-vinculo", dualAuthMiddleware, async (req, res) => {
+  if (!AUTH_SENHA_ATIVA) {
+    return res.status(503).json({ error: "Indisponível." });
+  }
+
+  const user = (req as any).user as DecodedIdToken | undefined;
+  if (!user) return res.status(401).json({ error: "Autenticação necessária." });
+
+  try {
+    const db = firestore();
+
+    const jaVinculado = await getBinding(user.uid);
+    if (jaVinculado) {
+      const linha = acharPorCpf(await fetchCorretoresAtivos(), jaVinculado.cpf);
+      if (!linha) return res.status(403).json({ error: "Cadastro de corretor inativo.", inactive: true });
+      return res.status(200).json({ bound: true, broker: mapCorretor(linha) });
+    }
+
+    const pendenteSnap = await db.collection("registro_pendente").doc(user.uid).get();
+    if (!pendenteSnap.exists) {
+      return res.status(403).json({ error: "Nenhum cadastro pendente para esta conta.", needsBinding: true });
+    }
+
+    const pendente = pendenteSnap.data() || {};
+    const alvoCpf = String(pendente.cpf || "");
+
+    const linha = acharPorCpf(await fetchCorretoresAtivos(), alvoCpf);
+    if (!linha) return res.status(403).json({ error: "Cadastro de corretor inativo.", inactive: true });
+
+    const corretorRef = db.collection("corretor_bindings").doc(alvoCpf);
+    const userRef = db.collection("user_bindings").doc(user.uid);
+
+    const resultado = await db.runTransaction<{ ok: boolean; erro?: string }>(async (tx) => {
+      const conflito = await tx.get(corretorRef);
+      if (conflito.exists && conflito.data()?.uid !== user.uid) {
+        return { ok: false, erro: "Este corretor já está vinculado a outra conta." };
+      }
+      tx.set(corretorRef, { uid: user.uid, boundAt: FieldValue.serverTimestamp() });
+      tx.set(userRef, {
+        cpf: alvoCpf,
+        nome: String(pendente.nome || ""),
+        email: user.email || null,
+        boundAt: FieldValue.serverTimestamp(),
+      });
+      tx.delete(pendenteSnap.ref);
+      return { ok: true };
+    });
+
+    if (!resultado.ok) {
+      console.warn(`[AuthSenha] Vínculo em conflito uid=${user.uid}`);
+      return res.status(409).json({ error: resultado.erro });
+    }
+
+    console.log(`[AuthSenha] Vínculo criado por senha uid=${user.uid} cpf=${maskCpf(alvoCpf)}`);
+    return res.status(200).json({ bound: true, broker: mapCorretor(linha) });
+  } catch (err: any) {
+    console.error("[AuthSenha] Erro ao ativar vínculo:", err.message);
+    return res.status(500).json({ error: "Erro ao concluir o cadastro. Tente novamente." });
   }
 });
 

@@ -229,12 +229,12 @@ ligado até o passo 8.
             Google permanece habilitado.
             Risco: baixo
 
-[ ] Task 3  Servidor: POST /api/auth/register-request e
+[x] Task 3  Servidor: POST /api/auth/register-request e
             POST /api/auth/reset-request — conferência no MariaDB, criação do
             usuário via Admin SDK, geração do link, resposta genérica,
-            rate limit estrito. Sem envio ainda (link só no log do servidor).
-            Arquivos: server.ts
-            Risco: médio
+            rate limit estrito. → CONCLUÍDA, ver §5.1.
+            Arquivos: server.ts, src/lib/identity.ts (+testes),
+                      firestore.rules, .env.example
 
 [ ] Task 4  Canal de entrega: envio do link por WhatsApp (e/ou e-mail).
             Arquivos: server.ts, .env
@@ -264,6 +264,49 @@ ligado até o passo 8.
             na coleção hoje). Definir TTL ou rotina de limpeza.
             Risco: baixo
 ```
+
+---
+
+## 5.1 O que a Task 3 entregou
+
+Três endpoints, todos atrás do interruptor `AUTH_SENHA_ENABLED` (padrão **0**):
+enquanto ele estiver desligado, respondem 503 e nada é criado. Isso permitiu
+subir o código para a VPS antes da Task 2, sem expor um fluxo pela metade.
+
+| Endpoint | Papel |
+|---|---|
+| `POST /api/auth/register-request` | Primeiro acesso. Público, rate limit 5/15min, resposta sempre genérica. |
+| `POST /api/auth/reset-request` | Recuperação. Só pede CPF; o destino sai da base. |
+| `POST /api/auth/ativar-vinculo` | Fecha o vínculo no primeiro login com senha. |
+
+### Desvio de escopo: o `ativar-vinculo` não estava no plano
+
+Ao implementar, apareceu um problema que o plano não previa. Se o
+`register-request` criasse o vínculo `corretor_bindings/{cpf}` na hora, ele
+**ocuparia o CPF antes de o corretor definir a senha** — e, enquanto o login
+Google segue ligado, o fluxo antigo passaria a responder 409 para aquele
+corretor. Seria uma regressão no meio da transição.
+
+Solução: o `register-request` grava uma pendência em `registro_pendente/{uid}`
+com o CPF e o nome **já conferidos contra o MariaDB**, e o vínculo só é fechado
+no `ativar-vinculo`, após o corretor provar posse do link. A alternativa seria
+mandar o corretor digitar nome, nascimento e CPF de novo depois de criar a
+senha — funcional, mas com dado duplicado sem motivo.
+
+A coleção `registro_pendente` foi negada ao cliente no `firestore.rules`, como
+as duas outras coleções de vínculo.
+
+### Detalhes de segurança aplicados
+
+- **Sem oráculo de enumeração:** resposta idêntica com dados certos ou errados,
+  e o mesmo custo de consulta ao banco nos dois caminhos.
+- **CPF sempre mascarado no log** (`maskCpf`), nunca em texto claro.
+- **Link nunca vai para o log por padrão.** O `AUTH_LINK_DEBUG` existe para o
+  piloto e nasce desligado — link de definição de senha é credencial, e o
+  `SECURITY_PRD.md` proíbe segredo em log (item 9).
+- **Senha inicial aleatória de 32 bytes**, que nunca sai do servidor. Criar a
+  conta sem senha alguma impediria gerar o link de redefinição depois.
+- **Reset exige corretor ativo:** desligado no CRM não recupera acesso.
 
 ---
 
