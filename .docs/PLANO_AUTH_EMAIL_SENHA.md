@@ -224,10 +224,9 @@ ligado até o passo 8.
             Containers de pé, mas não vinculados a este projeto.
             Aguardando resposta do Pedro.
 
-[ ] Task 2  Console Firebase: habilitar provedor E-mail/senha, ligar proteção
+[x] Task 2  Console Firebase: habilitar provedor E-mail/senha, ligar proteção
             contra enumeração de e-mail e política de senha forte.
-            Google permanece habilitado.
-            Risco: baixo
+            → CONCLUÍDA, ver §5.2. Google permanece habilitado.
 
 [x] Task 3  Servidor: POST /api/auth/register-request e
             POST /api/auth/reset-request — conferência no MariaDB, criação do
@@ -307,6 +306,38 @@ as duas outras coleções de vínculo.
 - **Senha inicial aleatória de 32 bytes**, que nunca sai do servidor. Criar a
   conta sem senha alguma impediria gerar o link de redefinição depois.
 - **Reset exige corretor ativo:** desligado no CRM não recupera acesso.
+
+---
+
+## 5.2 Task 2 — estado real conferido pela API, não pela tela
+
+O Pedro configurou pelo Console. A conferência foi feita lendo a configuração
+do projeto pela API de administração do Identity Toolkit
+(`GET /admin/v2/projects/{id}/config`), com a credencial de serviço da VPS.
+
+| Item | Estado |
+|---|---|
+| Provedor e-mail/senha | `{"enabled": true, "passwordRequired": true}` |
+| Proteção contra enumeração | `enableImprovedEmailPrivacy: true` |
+| Mínimo de caracteres | 8 |
+| Exige minúscula / maiúscula / número | true / true / true |
+| **Aplicação da política** | **estava `OFF`** → alterada para `ENFORCE` em 2026-07-31 |
+
+### O que a conferência pegou
+
+A política estava **definida mas inerte**: os requisitos certos, com
+`passwordPolicyEnforcementState: "OFF"`. Olhando só a tela do Console, ela
+parece configurada.
+
+Pior: essa inércia escondia um bug no código da Task 3. A senha inicial
+descartável era gerada com `base64url` puro, cujo alfabeto não garante dígito
+nem maiúscula — ~1 chance em 1.500 por cadastro, o que com 91 corretores dá
+cerca de 6% de chance de pelo menos uma falha `auth/weak-password`. Enquanto a
+política estava OFF, o bug nunca apareceria; ligá-la sem corrigir teria criado
+uma falha rara e intermitente no primeiro acesso.
+
+Corrigido no commit `71d2392` antes de ligar a aplicação, com teste de
+regressão em `atendePoliticaSenha`.
 
 ---
 
