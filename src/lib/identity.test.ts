@@ -8,6 +8,7 @@ import {
   mapCorretor,
   emailSinteticoDoCpf,
   DOMINIO_CORRETOR,
+  atendePoliticaSenha,
 } from './identity';
 
 /** Linha típica do MariaDB, com os nomes de coluna reais da base. */
@@ -230,5 +231,36 @@ describe('emailSinteticoDoCpf — identificador de login por CPF', () => {
     // O domínio é só identificador interno do Firebase; se apontasse para um
     // servidor de e-mail real, o CPF viraria endereço público.
     expect(DOMINIO_CORRETOR).toBe('corretor.antecipa.com.br');
+  });
+});
+
+describe('atendePoliticaSenha — política configurada no Console do Firebase', () => {
+  it('aceita senha com as três classes e 8 ou mais caracteres', () => {
+    expect(atendePoliticaSenha('Senha123')).toBe(true);
+  });
+
+  it('recusa quando falta cada uma das classes', () => {
+    expect(atendePoliticaSenha('senha123')).toBe(false); // sem maiúscula
+    expect(atendePoliticaSenha('SENHA123')).toBe(false); // sem minúscula
+    expect(atendePoliticaSenha('SenhaSenha')).toBe(false); // sem número
+  });
+
+  it('recusa senha curta mesmo com as três classes', () => {
+    expect(atendePoliticaSenha('Se1')).toBe(false);
+  });
+
+  it('trata entrada vazia ou nula sem estourar', () => {
+    expect(atendePoliticaSenha('')).toBe(false);
+    expect(atendePoliticaSenha(null as any)).toBe(false);
+    expect(atendePoliticaSenha(undefined as any)).toBe(false);
+  });
+
+  it('o sufixo usado na senha inicial do servidor satisfaz a política', () => {
+    // Reproduz o formato de senhaInicialDescartavel() no server.ts. O alfabeto
+    // do base64url sozinho não garante dígito nem maiúscula — este teste é a
+    // rede que impede a regressão de voltar.
+    const semSufixo = 'abcdefghijklmnopqrstuvwxyz'; // pior caso plausível
+    expect(atendePoliticaSenha(semSufixo)).toBe(false);
+    expect(atendePoliticaSenha(semSufixo + 'aA1')).toBe(true);
   });
 });

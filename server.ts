@@ -16,7 +16,7 @@ import { normalizeCPF } from "./src/lib/utils";
 // poder ser testada sem subir o servidor.
 import {
   isUserAllowed, maskCpf, cpfDaLinha, mapCorretor, matchCorretor, acharPorCpf,
-  emailSinteticoDoCpf, DOMINIO_CORRETOR,
+  emailSinteticoDoCpf, DOMINIO_CORRETOR, atendePoliticaSenha,
   TokenIdentidade,
 } from "./src/lib/identity";
 
@@ -523,6 +523,25 @@ const senhaLimiter = rateLimit({
  * verdade é o corretor, pelo link. Criar sem senha alguma impediria gerar o
  * link de redefinição depois.
  */
+/**
+ * Senha inicial descartável, que ninguém nunca vê — quem define a senha de
+ * verdade é o corretor, pelo link.
+ *
+ * O sufixo fixo garante as três classes exigidas pela política do Console
+ * (minúscula, maiúscula e número), que o alfabeto do base64url não assegura.
+ * Ele não enfraquece nada: a entropia continua vindo dos 32 bytes aleatórios.
+ */
+function senhaInicialDescartavel(): string {
+  const senha = crypto.randomBytes(32).toString("base64url") + "aA1";
+  // Falha fechada: se algum dia a política do Console ficar mais exigente que
+  // esta função, é melhor estourar aqui do que criar contas que o corretor não
+  // consegue ativar.
+  if (!atendePoliticaSenha(senha)) {
+    throw new Error("Senha inicial gerada não atende à política de senha.");
+  }
+  return senha;
+}
+
 async function prepararCredencial(cpfNormalizado: string): Promise<{ uid: string; link: string } | null> {
   const identificador = emailSinteticoDoCpf(cpfNormalizado, DOMINIO_CREDENCIAL);
   if (!identificador) return null;
@@ -538,7 +557,7 @@ async function prepararCredencial(cpfNormalizado: string): Promise<{ uid: string
     const criado = await auth.createUser({
       email: identificador,
       emailVerified: false,
-      password: crypto.randomBytes(32).toString("base64url"),
+      password: senhaInicialDescartavel(),
     });
     uid = criado.uid;
     console.log(`[AuthSenha] Credencial criada uid=${uid} cpf=${maskCpf(cpfNormalizado)}`);

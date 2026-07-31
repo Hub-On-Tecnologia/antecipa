@@ -63,6 +63,22 @@ export function cpfDaLinha(row: Record<string, any>): string {
 export const DOMINIO_CORRETOR = 'corretor.antecipa.com.br';
 
 /**
+ * Política de senha configurada no Console do Firebase: mínimo de 8, com
+ * minúscula, maiúscula e número.
+ *
+ * Existe aqui para que a senha inicial gerada pelo servidor seja conferida
+ * ANTES de ir ao Firebase. O alfabeto do base64url (A-Z a-z 0-9 - _) não
+ * garante as três classes: em 43 caracteres, a chance de não sair nenhum
+ * dígito é de ~1 em 1.500. Com 91 corretores, isso é aproximadamente 6% de
+ * chance de pelo menos um cadastro falhar com auth/weak-password — falha rara
+ * e intermitente, cara de diagnosticar depois.
+ */
+export function atendePoliticaSenha(senha: string): boolean {
+  const s = String(senha ?? '');
+  return s.length >= 8 && /[a-z]/.test(s) && /[A-Z]/.test(s) && /[0-9]/.test(s);
+}
+
+/**
  * Identificador da credencial no Firebase, derivado do CPF.
  *
  * O Firebase exige um e-mail como identificador de login por senha, mas pedir
