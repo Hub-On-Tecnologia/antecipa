@@ -80,10 +80,21 @@ corte, contra o que o próprio `SECURITY_PRD.md` recomenda.
 - **Não existe nenhuma variável de evolution no `.env` do Antecipa.** A
   instância pertence a outro projeto hospedado na mesma máquina.
 
-**Pendente com o Pedro:** a instância é de vocês? Pode ser usada por este
-projeto? Existe número de origem dedicado? Enquanto não houver resposta, a
-Task 4 (canal de entrega) fica bloqueada — mas ela só entra depois da Task 3,
-então não trava o início.
+**RESPONDIDO em 2026-07-31:** a instância pertence a outro projeto na VPS.
+**Não deve ser usada nem alterada.**
+
+Consequência para a **Task 4**: o canal de entrega precisa ser próprio. Duas
+saídas, e a escolha é do Pedro:
+
+1. **Instância WhatsApp própria** para a Antecipa (nova Evolution API,
+   Cloud API oficial da Meta, ou serviço equivalente). Mantém a cobertura de
+   100% medida na Task 0 e usa um canal que o corretor já espera.
+2. **E-mail transacional** com domínio próprio (SPF/DKIM em `antecipa.com.br`).
+   Cobre 96,7% da base — 3 corretores ativos ficariam sem caminho automático e
+   virariam exceção operacional.
+
+Enquanto a Task 4 não tiver canal, o `AUTH_SENHA_ENABLED` deve continuar em
+`0`: sem entrega, o corretor não recebe o link e o cadastro não se completa.
 
 ---
 
@@ -219,10 +230,10 @@ ligado até o passo 8.
             Plano viável para 100% da base. Achado novo: enable_app desligado
             em 45% dos ativos, exige decisão antes de virar pré-requisito.
 
-[~] Task 1  Confirmar a instância evolution-api: é de vocês? Pode ser usada?
-            Existe número de origem dedicado? → PARCIAL, ver §1.2.
-            Containers de pé, mas não vinculados a este projeto.
-            Aguardando resposta do Pedro.
+[x] Task 1  Confirmar a instância evolution-api. → CONCLUÍDA.
+            RESPOSTA DO PEDRO (2026-07-31): a instância é de OUTRO PROJETO
+            hospedado na mesma VPS. NÃO USAR e não mexer. A Task 4 precisa de
+            um canal próprio — ver §1.2.
 
 [x] Task 2  Console Firebase: habilitar provedor E-mail/senha, ligar proteção
             contra enumeração de e-mail e política de senha forte.
@@ -239,11 +250,11 @@ ligado até o passo 8.
             Arquivos: server.ts, .env
             Risco: médio
 
-[ ] Task 5  Frontend: telas de primeiro acesso, login por CPF+senha e
-            recuperação. Google segue disponível lado a lado.
-            Arquivos: src/components/LoginForm.tsx, src/App.tsx,
-                      src/services/firebaseService.ts
-            Risco: médio
+[x] Task 5  Frontend: telas de primeiro acesso, login por CPF+senha e
+            recuperação. → CONCLUÍDA, ver §5.3.
+            Arquivos: src/components/AcessoSenha.tsx (novo), src/App.tsx,
+                      src/services/firebaseService.ts, sheetsService.ts,
+                      src/lib/utils.ts (+testes)
 
 [ ] Task 6  Decidir e aplicar a persistência de sessão (ver §7).
             Arquivos: src/services/firebaseService.ts
@@ -338,6 +349,34 @@ uma falha rara e intermitente no primeiro acesso.
 
 Corrigido no commit `71d2392` antes de ligar a aplicação, com teste de
 regressão em `atendePoliticaSenha`.
+
+---
+
+## 5.3 O que a Task 5 entregou
+
+Componente novo `AcessoSenha.tsx` com os três fluxos numa tela só — entrar,
+primeiro acesso e recuperar senha —, porque para quem está de fora é o mesmo
+assunto. O login Google continua ao lado, rebaixado a "outra forma de entrar",
+e sai na Task 8.
+
+- **`signInWithCpfSenha`** monta o identificador a partir do CPF **no próprio
+  navegador**. Não existe requisição do tipo "qual o e-mail deste CPF?", que
+  seria um oráculo de enumeração da base de corretores.
+- **Mensagem de erro única.** O Firebase distingue `auth/user-not-found` de
+  `auth/wrong-password`; repassar essa diferença confirmaria quais CPFs têm
+  cadastro. A tela diz sempre "CPF ou senha incorretos".
+- **Vínculo pendente fecha sozinho.** Ao resolver a identidade, o `App.tsx`
+  chama o `ativar-vinculo` quando não há vínculo — o corretor não digita nome,
+  nascimento e CPF de novo depois de criar a senha.
+- **Máscaras de CPF e data extraídas** para `lib/utils` com testes, em vez de
+  duplicadas entre o `LoginForm` e a tela nova.
+
+### Verificação visual em produção
+
+Com o interruptor desligado, emiti um token de acesso pela chave de integração,
+abri o portal no navegador e exercitei a tela: os três modos alternam, o
+formulário de primeiro acesso envia ao servidor e a resposta 503 aparece como
+"O cadastro por senha ainda não está disponível". Sem erro no console.
 
 ---
 
