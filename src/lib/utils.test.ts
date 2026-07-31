@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeCPF, normalizeDate, normalizeName } from './utils';
+import { normalizeCPF, normalizeDate, normalizeName, formatarCPF, formatarDataBR } from './utils';
 
 describe('normalizeCPF', () => {
   it('remove pontuação e retorna só dígitos', () => {
@@ -48,5 +48,43 @@ describe('normalizeName', () => {
 
   it('lida com string já normalizada', () => {
     expect(normalizeName('pedro souza')).toBe('pedro souza');
+  });
+});
+
+describe('formatarCPF — máscara de digitação', () => {
+  it('aplica a máscara progressivamente', () => {
+    expect(formatarCPF('123')).toBe('123');
+    expect(formatarCPF('1234')).toBe('123.4');
+    expect(formatarCPF('1234567')).toBe('123.456.7');
+    expect(formatarCPF('12345678909')).toBe('123.456.789-09');
+  });
+
+  it('ignora letras e trunca o excedente', () => {
+    expect(formatarCPF('abc12345678909999')).toBe('123.456.789-09');
+  });
+
+  it('o resultado ainda normaliza para o mesmo CPF', () => {
+    // A máscara é só visual: o que vai ao servidor passa por normalizeCPF.
+    expect(normalizeCPF(formatarCPF('12345678909'))).toBe('12345678909');
+  });
+
+  it('não estoura com vazio', () => {
+    expect(formatarCPF('')).toBe('');
+  });
+});
+
+describe('formatarDataBR — máscara de digitação', () => {
+  it('aplica a máscara progressivamente', () => {
+    expect(formatarDataBR('14')).toBe('14');
+    expect(formatarDataBR('1403')).toBe('14/03');
+    expect(formatarDataBR('14031985')).toBe('14/03/1985');
+  });
+
+  it('trunca o excedente', () => {
+    expect(formatarDataBR('140319851234')).toBe('14/03/1985');
+  });
+
+  it('não estoura com vazio', () => {
+    expect(formatarDataBR('')).toBe('');
   });
 });

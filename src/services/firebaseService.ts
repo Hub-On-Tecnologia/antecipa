@@ -1,5 +1,6 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, User } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, onAuthStateChanged, User } from 'firebase/auth';
+import { emailSinteticoDoCpf } from '../lib/identity';
 import { getFirestore, setDoc, getDocs, collection, query, where, serverTimestamp, getDocFromServer, doc as firestoreDoc, updateDoc, addDoc, onSnapshot, orderBy, limit, deleteDoc, writeBatch } from 'firebase/firestore';
 import { Receivable } from './sheetsService';
 
@@ -67,6 +68,22 @@ export async function testConnection() {
       console.error("Please check your Firebase configuration.");
     }
   }
+}
+
+/**
+ * Login por CPF e senha.
+ *
+ * O identificador da credencial no Firebase é derivado do CPF e montado AQUI,
+ * no navegador. Não existe nenhuma consulta do tipo "qual o e-mail deste CPF?",
+ * que seria um oráculo de enumeração da base de corretores.
+ */
+export async function signInWithCpfSenha(cpf: string, senha: string) {
+  const identificador = emailSinteticoDoCpf(cpf);
+  if (!identificador) {
+    throw new Error('CPF inválido.');
+  }
+  const result = await signInWithEmailAndPassword(auth, identificador, senha);
+  return result.user;
 }
 
 export async function signInWithGoogle() {

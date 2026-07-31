@@ -26,3 +26,22 @@ export function normalizeDate(date: string): string {
 export function normalizeName(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, ' ');
 }
+
+/** Máscara de CPF enquanto o usuário digita: 000.000.000-00 */
+export function formatarCPF(valor: string): string {
+  return String(valor || '')
+    .replace(/\D/g, '')
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d{1,2})/, '$1-$2')
+    .replace(/(-\d{2})\d+?$/, '$1');
+}
+
+/** Máscara de data enquanto o usuário digita: 00/00/0000 */
+export function formatarDataBR(valor: string): string {
+  return String(valor || '')
+    .replace(/\D/g, '')
+    .replace(/(\d{2})(\d)/, '$1/$2')
+    .replace(/(\d{2})(\d)/, '$1/$2')
+    .replace(/(\/\d{4})\d+?$/, '$1');
+}

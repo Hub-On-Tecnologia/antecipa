@@ -215,3 +215,90 @@ export async function bindBrokerIdentity(
   return { ok: false, error: data.error || 'Nao foi possivel validar seus dados.' };
 }
 
+/**
+ * Primeiro acesso por senha. O corretor prova quem é com nome, nascimento e
+ * CPF; o link de definição de senha vai para o contato QUE JÁ ESTÁ NA BASE —
+ * ele nunca informa um e-mail aqui.
+ *
+ * A resposta é sempre a mesma, dados conferindo ou não: se variasse, o
+ * endpoint viraria um consultor de "este CPF é corretor da Antecipa?".
+ */
+export async function solicitarPrimeiroAcesso(
+  nome: string,
+  dataNascimento: string,
+  cpf: string,
+): Promise<{ ok: boolean; message: string }> {
+  const response = await fetch('/api/auth/register-request', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nome, dataNascimento, cpf }),
+    signal: AbortSignal.timeout(20000),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (response.status === 429) {
+    return { ok: false, message: 'Muitas tentativas. Aguarde alguns minutos antes de tentar de novo.' };
+  }
+  if (response.status === 503) {
+    return { ok: false, message: 'O cadastro por senha ainda não está disponível.' };
+  }
+  if (!response.ok) {
+    return { ok: false, message: data.error || 'Não foi possível processar a solicitação.' };
+  }
+
+  return { ok: true, message: data.message || 'Se os dados conferirem, enviamos um link para o contato cadastrado.' };
+}
+
+/** Recuperação de senha. Só o CPF é pedido; o destino sai da base. */
+export async function solicitarRecuperacaoSenha(
+  cpf: string,
+): Promise<{ ok: boolean; message: string }> {
+  const response = await fetch('/api/auth/reset-request', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cpf }),
+    signal: AbortSignal.timeout(20000),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (response.status === 429) {
+    return { ok: false, message: 'Muitas tentativas. Aguarde alguns minutos antes de tentar de novo.' };
+  }
+  if (response.status === 503) {
+    return { ok: false, message: 'A recuperação de senha ainda não está disponível.' };
+  }
+  if (!response.ok) {
+    return { ok: false, message: data.error || 'Não foi possível processar a solicitação.' };
+  }
+
+  return { ok: true, message: data.message || 'Se os dados conferirem, enviamos um link para o contato cadastrado.' };
+}
+
+/**
+ * Fecha o vínculo pendente no primeiro login com senha.
+ *
+ * A identidade já foi conferida contra o MariaDB no primeiro acesso, então
+ * aqui não se pede nada de novo. Devolve `ok: false` em silêncio quando não há
+ * pendência — é o caso de quem entrou pelo Google, que segue pelo LoginForm.
+ */
+export async function ativarVinculoPendente(): Promise<{ ok: boolean; broker?: UserData }> {
+  try {
+    const response = await fetch('/api/auth/ativar-vinculo', {
+      method: 'POST',
+      headers: await authHeaders(),
+      credentials: 'same-origin',
+      signal: AbortSignal.timeout(20000),
+    });
+
+    if (!response.ok) return { ok: false };
+
+    const data = await response.json().catch(() => ({}));
+    return data.bound && data.broker ? { ok: true, broker: data.broker } : { ok: false };
+  } catch (err) {
+    console.warn('[auth] Falha ao ativar vínculo pendente:', err);
+    return { ok: false };
+  }
+}
+

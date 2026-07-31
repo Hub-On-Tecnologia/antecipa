@@ -7,12 +7,13 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { LogOut, Shield, LogIn, ArrowRight, Sun, Moon, Lock, ShieldAlert, Key, Sparkles, Loader2, RefreshCw, Terminal } from 'lucide-react';
 import LoginForm from './components/LoginForm';
+import AcessoSenha from './components/AcessoSenha';
 import Dashboard from './components/Dashboard';
 import InstitutionalPage from './components/InstitutionalPage';
 import TutorialPage from './components/TutorialPage';
 import QAPanel from './components/QAPanel';
 import { UserAuth } from './services/bitrixService';
-import { fetchCurrentBroker } from './services/sheetsService';
+import { fetchCurrentBroker, ativarVinculoPendente } from './services/sheetsService';
 import { cn } from './lib/utils';
 import { auth, onAuthStateChanged, signInWithGoogle, User } from './services/firebaseService';
 
@@ -73,6 +74,17 @@ export default function App() {
         if (cancelled) return;
         if (resultado.bound && resultado.broker) {
           setUserAuthData(resultado.broker);
+          return;
+        }
+
+        // Conta criada pelo fluxo de senha: a identidade já foi conferida
+        // contra o MariaDB no primeiro acesso e o vínculo ficou pendente.
+        // Fecha sozinho aqui, sem pedir os mesmos dados de novo. Quem entrou
+        // pelo Google não tem pendência e segue para o LoginForm.
+        const ativado = await ativarVinculoPendente();
+        if (cancelled) return;
+        if (ativado.ok && ativado.broker) {
+          setUserAuthData(ativado.broker);
         }
       } catch (err) {
         console.error('Erro ao resolver identidade do corretor:', err);
@@ -648,13 +660,15 @@ export default function App() {
               <div className="space-y-6">
                 {!firebaseUser ? (
                   <div className="flex flex-col gap-4">
-                    <div className="flex items-center gap-4 text-[10px] font-bold tracking-widest text-amber-600">
-                      <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
-                      <span>CONEXÃO SEGURA PENDENTE</span>
+                    {/* Caminho antigo, mantido lado a lado durante a transição.
+                        Sai na Task 8, quando o provedor Google for desligado. */}
+                    <div className="flex items-center gap-4 text-[10px] font-bold tracking-widest text-black/30">
+                      <div className="w-2 h-2 rounded-full bg-black/20"></div>
+                      <span>OUTRA FORMA DE ENTRAR</span>
                     </div>
-                    <button 
+                    <button
                       onClick={handleGoogleSignIn}
-                      className="flex items-center justify-center gap-3 bg-[#0A0A0A] text-white py-5 text-[10px] uppercase tracking-[0.3em] font-bold rounded-sm border border-black hover:bg-black/90 transition-all shadow-[0_10px_40px_rgba(0,0,0,0.1)] group"
+                      className="flex items-center justify-center gap-3 bg-white text-black/60 py-4 text-[10px] uppercase tracking-[0.3em] font-bold rounded-sm border border-black/10 hover:border-black/30 hover:text-black transition-all group"
                     >
                       <LogIn size={14} className="group-hover:translate-x-1 transition-transform" />
                       Login com Google
@@ -667,7 +681,7 @@ export default function App() {
                   </div>
                 )}
                  <p className="text-[10px] uppercase tracking-[0.2em] text-black/25 leading-relaxed font-medium">
-                  Acesso restrito ao quadro de colaboradores. A autenticação Google é necessária para sincronização em tempo real.
+                  Acesso restrito ao quadro de colaboradores. Use seu CPF e senha; o login com Google segue disponível durante a transição.
                 </p>
                 
                 <div className="pt-4 border-t border-black/5 flex flex-col gap-0.5 text-[9px] text-black/30 font-semibold uppercase tracking-wider">
@@ -679,14 +693,12 @@ export default function App() {
 
             {/* Main Login Pane */}
             <div className="flex-1 flex items-center justify-center p-6 sm:p-12 md:p-20 bg-[#0A0A0A]">
-              <div className={!firebaseUser ? 'opacity-20 pointer-events-none grayscale' : ''}>
-                 <LoginForm onLoginSuccess={handleLoginSuccess} />
-                 {!firebaseUser && (
-                   <div className="mt-8 text-center bg-white/5 border border-white/10 p-6 rounded-sm">
-                     <p className="text-[10px] uppercase tracking-[0.2em] text-white/40 font-bold">Faça login com Google primeiro para liberar o formulário.</p>
-                   </div>
-                 )}
-              </div>
+              {/* Sem sessão: acesso por CPF e senha, que cobre 100% do quadro.
+                  Com sessão Google mas sem vínculo: confirmação de identidade
+                  do fluxo antigo, que sai de cena na Task 8. */}
+              {!firebaseUser
+                ? <AcessoSenha />
+                : <LoginForm onLoginSuccess={handleLoginSuccess} />}
             </div>
           </motion.div>
         ) : (
