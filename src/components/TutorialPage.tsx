@@ -582,16 +582,49 @@ Seu servidor chama <code>POST /api/access-tokens</code> com o header <code>X-Int
               theme === 'dark' ? "bg-black/40 text-emerald-400/80 border border-white/5" : "bg-slate-50 text-emerald-700 border border-slate-100"
             )}>
 {`POST ${window.location.origin}/api/access-tokens
-X-Integration-Key: <sua-chave-de-integracao>
 
-200 OK
-{ "tokenId": "token_a1b2c3..." }
+Header obrigatorio:
+  X-Integration-Key: <sua-chave-de-integracao>
 
-401  chave ausente ou invalida
-429  limite de emissoes excedido (30/min)
+Corpo: nenhum. Nao envie JSON, form nem query string.
 
-Depois: abra ${window.location.origin}/?token=<tokenId>
-Validade: 1 minuto, uso unico.`}
+--- Respostas ---
+
+200  { "tokenId": "token_a1b2c3..." }
+403  { "error": "Acesso negado." }          chave ausente ou invalida
+429  { "error": "Muitas emissoes..." }      mais de 30 emissoes/min do mesmo IP
+500  { "error": "Erro interno..." }         falha nossa; pode repetir
+
+--- O que fazer com o tokenId ---
+
+Monte  ${window.location.origin}/?token=<tokenId>
+e carregue essa URL na WebView do app.
+
+Validade: 60 segundos, contados da emissao.
+Uso unico: o primeiro carregamento consome e apaga o codigo.
+Emita um codigo NOVO a cada abertura da tela.`}
+            </pre>
+
+            <p className={cn(
+              "text-[11px] leading-relaxed mt-4 mb-2 font-semibold",
+              theme === 'dark' ? "text-white/70" : "text-slate-600"
+            )}>
+              Teste em 10 segundos, antes de escrever qualquer código
+            </p>
+            <p className={cn(
+              "text-[11px] leading-relaxed mb-3",
+              theme === 'dark' ? "text-white/50" : "text-slate-500"
+            )}>
+              Rode isto no terminal do seu servidor. Se voltar um <code>tokenId</code>, sua chave está válida e a
+              integração inteira se resume a repetir esta chamada. Cole a URL montada no navegador dentro de 1
+              minuto para ver a tela de acesso do corretor.
+            </p>
+            <pre className={cn(
+              "p-4 rounded-sm font-mono text-[10px] leading-relaxed overflow-x-auto",
+              theme === 'dark' ? "bg-black/40 text-amber-300/90 border border-white/5" : "bg-slate-50 text-amber-700 border border-slate-100"
+            )}>
+{`curl -X POST ${window.location.origin}/api/access-tokens \\
+  -H "X-Integration-Key: SUA_CHAVE_AQUI"`}
             </pre>
           </div>
 
