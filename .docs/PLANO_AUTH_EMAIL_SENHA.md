@@ -246,9 +246,16 @@ ligado até o passo 8.
             Arquivos: server.ts, src/lib/identity.ts (+testes),
                       firestore.rules, .env.example
 
-[ ] Task 4  Canal de entrega: envio do link por WhatsApp (e/ou e-mail).
-            Arquivos: server.ts, .env
-            Risco: médio
+[x] Task 4  Canal de entrega: envio do link por e-mail. → CONCLUÍDA.
+            WhatsApp descartado por decisão do Pedro (2026-07-31).
+            Agnóstico de provedor via SMTP. Gmail pessoal em caráter
+            provisório até o domínio definitivo ser contratado (ver Task 10).
+            Arquivos: server.ts, src/lib/emails.ts (+testes), .env.example
+
+[ ] Task 10 QUANDO O DOMÍNIO DEFINITIVO FOR CONTRATADO — ver §7.1.
+            Trocar o remetente provisório, configurar SPF e DKIM e reavaliar
+            o assunto/identidade visual do e-mail.
+            Risco: baixo, mas sem isso a entrega fica instável
 
 [x] Task 5  Frontend: telas de primeiro acesso, login por CPF+senha e
             recuperação. → CONCLUÍDA, ver §5.3.
@@ -431,6 +438,19 @@ autenticação. Manter o botão seria manter um caminho com quebra programada.
 consegue entrar no portal como corretor — não há como receber o link para
 criar a senha. Para testes, use o interruptor `AUTH_LINK_DEBUG` na VPS, que
 imprime o link no log do servidor.
+
+## 7.1 Pendências para quando o domínio definitivo for contratado (Task 10)
+
+Decisão do Pedro em 2026-07-31: o envio sai por **Gmail pessoal**, em caráter
+provisório, só para validar o fluxo. O que fica para a troca de domínio:
+
+| Pendência | Por quê |
+|---|---|
+| **SPF e DKIM no domínio** | Sem os dois registros no DNS, mesmo remetente próprio cai em spam ou na aba de promoções. É o que mais afeta a entrega — e a falha é silenciosa: o corretor simplesmente não recebe e liga reclamando que o cadastro não funciona. |
+| **Trocar o remetente** | `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS` e `SMTP_FROM` no `.env` da VPS. Nenhuma linha de código muda — o envio é agnóstico de provedor de propósito. |
+| **Sair do Gmail pessoal** | Conta pessoal tem limite de envio diário, mistura o operacional com o particular e some se a pessoa sair da empresa. |
+| **Identidade visual do e-mail** | O template atual é sóbrio e sem logo. Com domínio próprio vale revisar assunto e marca. |
+| **DMARC** | Depois de SPF e DKIM estáveis, fecha o ciclo contra falsificação do domínio. |
 
 ### Ainda em aberto
 
