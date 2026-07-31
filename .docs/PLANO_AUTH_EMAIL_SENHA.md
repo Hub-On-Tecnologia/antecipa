@@ -256,19 +256,22 @@ ligado até o passo 8.
                       src/services/firebaseService.ts, sheetsService.ts,
                       src/lib/utils.ts (+testes)
 
-[ ] Task 6  Decidir e aplicar a persistência de sessão (ver §7).
+[x] Task 6  Decidir e aplicar a persistência de sessão. → CONCLUÍDA.
+            DECISÃO: senha a cada acesso (`inMemoryPersistence`).
             Arquivos: src/services/firebaseService.ts
-            Risco: baixo
 
 [ ] Task 7  Piloto: 3 a 5 corretores reais fazendo o primeiro acesso ponta a
             ponta, com acompanhamento.
             Risco: baixo
 
-[ ] Task 8  Corte: desabilitar o provedor Google no Console e remover o botão.
-            O único vínculo existente hoje é de teste — se for de conta Google,
-            é recriado em 2 minutos.
-            Arquivos: src/App.tsx, src/services/firebaseService.ts
-            Risco: baixo (dado o achado #1)
+[~] Task 8  Corte do Google. → ANTECIPADA E PARCIAL.
+            FEITO: removido do caminho do corretor (commit c5e9def), porque
+            manter o botão seria deixar um caminho que quebra dentro da
+            WebView — o motivo de toda esta mudança.
+            FALTA: o painel de gerar token (admin) ainda usa Google. Não roda
+            na WebView e está dormente (allowlist de admin vazia), mas precisa
+            de decisão antes de desabilitar o provedor no Console.
+            Arquivos: src/App.tsx
 
 [ ] Task 9  Limpeza: os access_tokens expirados nunca são apagados (8 parados
             na coleção hoje). Definir TTL ou rotina de limpeza.
@@ -394,20 +397,47 @@ formulário de primeiro acesso envia ao servidor e a resposta 503 aparece como
 
 ---
 
-## 7. Decisões que dependem de você
+## 7. Decisões tomadas em 2026-07-31
 
-1. **A sessão fica salva no navegador?**
-   Com senha, o padrão do Firebase é manter o login (`browserLocalPersistence`).
-   Vocês removeram de propósito a sessão de 8h no commit `8a15457`. Manter essa
-   postura significa `browserSessionPersistence` — o corretor digita a senha a
-   cada abertura. Mais seguro, mais atrito.
+| Tema | Decisão |
+|---|---|
+| Persistência de sessão | **Senha a cada acesso** (`inMemoryPersistence`). Atrito intencional. |
+| Canal de entrega | **Não usar WhatsApp agora.** Task 4 vai por e-mail. |
+| Destino do link | **Todos os e-mails do cadastro**, não um escolhido pelo corretor. |
+| Login Google | **Fora do caminho do corretor.** Some do painel admin em decisão à parte. |
+| Mensagens de erro | Específicas em tudo que não revela existência de cadastro. |
 
-2. **O portal continua exclusivo do app parceiro?**
-   Se sim, o portão de token continua sendo a única barreira ao acesso direto
-   pelo navegador. Se não, ele pode ser aposentado, e o portal ganha URL
-   própria de login.
+### Por que NÃO existe a tela "qual desses é o seu e-mail?"
 
-3. **Quem é o dono da instância evolution-api na VPS?** (Task 1)
+A ideia foi levantada e descartada por inverter a proteção. Quem chega nessa
+tela digitou CPF, nome e nascimento — dados que circulam em vazamentos. Mostrar
+as opções de e-mail **entrega o dado a quem só tinha os três primeiros**, em
+vez de exigir posse da caixa. Além disso, com opções falsas o endereço real
+costuma ser identificável pelo domínio e formato, e a escolha vira acerto de 1
+em 3 ou 1 em 4 — com 5 tentativas por janela de 15 minutos.
+
+O problema legítimo por trás da ideia — a base tem três campos de e-mail e não
+se sabe qual o corretor lê — foi resolvido enviando para **todos os distintos**
+(`emailsDoCorretor`), sem perguntar e sem mostrar nada.
+
+### Por que o Google saiu antes da hora
+
+O plano previa o corte só na Task 8, depois do piloto. Foi antecipado porque
+`signInWithPopup` falha com `disallowed_useragent` dentro de WebView — e a
+migração de Custom Tab para WebView é justamente o motivo desta mudança de
+autenticação. Manter o botão seria manter um caminho com quebra programada.
+
+**Consequência operacional:** enquanto a Task 4 não entregar o e-mail, ninguém
+consegue entrar no portal como corretor — não há como receber o link para
+criar a senha. Para testes, use o interruptor `AUTH_LINK_DEBUG` na VPS, que
+imprime o link no log do servidor.
+
+### Ainda em aberto
+
+1. **O portal continua exclusivo do app parceiro?** Se sim, o portão de token
+   segue sendo a única barreira ao acesso direto pelo navegador.
+2. **Como o administrador entra** no painel de gerar token depois que o Google
+   sair de vez. Hoje a allowlist está vazia, então o painel está dormente.
 
 ---
 
