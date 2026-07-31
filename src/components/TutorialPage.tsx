@@ -6,7 +6,6 @@ import {
   Check, 
   ExternalLink, 
   ShieldCheck, 
-  ArrowRight, 
   Lock, 
   Server, 
   Terminal, 
@@ -184,19 +183,6 @@ function gerarLinkAcesso() {
               <span>Ir para o Portal</span>
             </button>
 
-            {/* Gerador de testes */}
-            <button
-              onClick={() => window.location.href = `${window.location.origin}/gerar-codigo`}
-              className={cn(
-                "px-4 py-2 text-xs uppercase tracking-wider rounded-sm transition-all active:scale-95 flex items-center gap-2 font-bold",
-                theme === 'dark' 
-                  ? "bg-emerald-500 hover:bg-emerald-600 text-black" 
-                  : "bg-[#0A0A0A] hover:bg-black text-white"
-              )}
-            >
-              <span>Testar Simulador</span>
-              <ArrowRight size={12} />
-            </button>
 
             {/* Theme Switcher */}
             <button
