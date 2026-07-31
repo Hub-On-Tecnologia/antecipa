@@ -892,20 +892,6 @@ app.post("/api/auth/ativar-vinculo", dualAuthMiddleware, async (req, res) => {
 });
 
 /**
- * GET /api/access-tokens/verify-user
- * Verifica se o usuário autenticado no Firebase é permitido na allowlist.
- * Comentário obrigatório:
- * Este check é UX, não segurança. A fronteira real é a allowlist em POST /api/access-tokens. Nunca confiar apenas neste retorno.
- */
-app.get("/api/access-tokens/verify-user", dualAuthMiddleware, (req, res) => {
-  const user = (req as any).user as DecodedIdToken | undefined;
-  if (!user || !isUserAllowed(user)) {
-    return res.status(403).json({ allowed: false, error: "Conta não autorizada na allowlist." });
-  }
-  return res.status(200).json({ allowed: true, uid: user.uid, email: user.email });
-});
-
-/**
  * Chave de integração servidor-a-servidor (INTEGRATION_API_KEY).
  *
  * Existe para que o backend do app parceiro possa pedir um código de acesso
@@ -949,32 +935,23 @@ const mintLimiter = rateLimit({
  * POST /api/access-tokens
  * Emite um código de acesso de uso único (válido por 1 minuto).
  *
- * Duas vias de autorização:
- * 1. X-Integration-Key — backend do app parceiro (servidor-a-servidor).
- * 2. Firebase ID Token de conta ADMIN — usado pela tela /gerar-codigo.
+ * Uma única via: X-Integration-Key, do backend do app parceiro,
+ * servidor-a-servidor.
+ *
+ * Existia uma segunda via, por conta ADMIN autenticada, que servia à tela
+ * /gerar-codigo — um simulador do que o parceiro faz. A tela saiu (2026-07-31,
+ * decisão do Pedro: quem corrige e emite é o fornecedor), e manter a via sem
+ * quem a chame deixaria de pé um caminho a mais para emitir código de acesso,
+ * sem nenhum uso. Menos portas, menos superfície.
  */
 app.post("/api/access-tokens", mintLimiter, async (req, res) => {
-  const chaveIntegracao = req.headers["x-integration-key"];
-  const viaIntegracao = integrationKeyIsValid(chaveIntegracao);
-
-  let emissor = "integracao";
-  let emissorUid: string | null = null;
-
-  if (!viaIntegracao) {
-    // Sem chave de integração válida: exige admin autenticado.
-    // dualAuthMiddleware é async e, ao negar, responde 401 sem chamar next().
-    // Basta aguardá-lo e checar se a resposta já saiu — encapsular em Promise
-    // que só resolve no next() travaria a requisição no caminho negado.
-    await dualAuthMiddleware(req, res, () => {});
-    if (res.headersSent) return;
-
-    const user = (req as any).user as DecodedIdToken | undefined;
-    if (!user || !isUserAllowed(user)) {
-      return res.status(403).json({ error: "Acesso negado: conta não autorizada." });
-    }
-    emissor = "admin";
-    emissorUid = user.uid;
+  if (!integrationKeyIsValid(req.headers["x-integration-key"])) {
+    console.warn(`[AccessTokens] Emissão negada ip=${req.ip}`);
+    return res.status(403).json({ error: "Acesso negado." });
   }
+
+  const emissor = "integracao";
+  const emissorUid: string | null = null;
 
   try {
     const uuid = crypto.randomUUID().replace(/-/g, "");
