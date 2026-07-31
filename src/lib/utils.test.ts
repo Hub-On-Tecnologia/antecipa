@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeCPF, normalizeDate, normalizeName, formatarCPF, formatarDataBR } from './utils';
+import { normalizeCPF, normalizeDate, normalizeName, formatarCPF, formatarDataBR, cpfEhValido, dataBREhValida } from './utils';
 
 describe('normalizeCPF', () => {
   it('remove pontuação e retorna só dígitos', () => {
@@ -70,6 +70,51 @@ describe('formatarCPF — máscara de digitação', () => {
 
   it('não estoura com vazio', () => {
     expect(formatarCPF('')).toBe('');
+  });
+});
+
+describe('cpfEhValido — dígitos verificadores', () => {
+  it('aceita CPF válido com e sem pontuação', () => {
+    expect(cpfEhValido('123.456.789-09')).toBe(true);
+    expect(cpfEhValido('12345678909')).toBe(true);
+  });
+
+  it('recusa dígito verificador errado', () => {
+    expect(cpfEhValido('12345678900')).toBe(false);
+  });
+
+  it('recusa sequência repetida, que passa na aritmética mas não vale', () => {
+    expect(cpfEhValido('11111111111')).toBe(false);
+    expect(cpfEhValido('00000000000')).toBe(false);
+  });
+
+  it('recusa tamanho errado e entrada vazia', () => {
+    expect(cpfEhValido('123456789')).toBe(false);
+    expect(cpfEhValido('')).toBe(false);
+    expect(cpfEhValido(null as any)).toBe(false);
+  });
+});
+
+describe('dataBREhValida — data real do calendário', () => {
+  it('aceita data completa e existente', () => {
+    expect(dataBREhValida('14/03/1985')).toBe(true);
+    expect(dataBREhValida('29/02/2024')).toBe(true); // bissexto
+  });
+
+  it('recusa dia que não existe no mês', () => {
+    expect(dataBREhValida('31/04/1990')).toBe(false);
+    expect(dataBREhValida('29/02/2023')).toBe(false); // não bissexto
+  });
+
+  it('recusa mês fora da faixa e formato incompleto', () => {
+    expect(dataBREhValida('10/13/1990')).toBe(false);
+    expect(dataBREhValida('14/03')).toBe(false);
+    expect(dataBREhValida('')).toBe(false);
+  });
+
+  it('recusa ano absurdo ou no futuro', () => {
+    expect(dataBREhValida('01/01/1899')).toBe(false);
+    expect(dataBREhValida(`01/01/${new Date().getFullYear() + 1}`)).toBe(false);
   });
 });
 

@@ -37,6 +37,43 @@ export function formatarCPF(valor: string): string {
     .replace(/(-\d{2})\d+?$/, '$1');
 }
 
+/**
+ * Valida CPF pelos dígitos verificadores.
+ *
+ * Serve para separar erro de digitação de credencial errada. Sem isso, quem
+ * troca um número no CPF recebe "CPF ou senha incorretos" e vai tentar
+ * lembrar a senha, quando o problema estava no campo de cima. A conferência é
+ * puramente aritmética e não consulta nada — não revela se o CPF é cliente.
+ */
+export function cpfEhValido(cpf: string): boolean {
+  const limpo = String(cpf || '').replace(/\D/g, '');
+  if (limpo.length !== 11) return false;
+  // Sequências como 111.111.111-11 passam na aritmética, mas não são válidas.
+  if (/^(\d)\1{10}$/.test(limpo)) return false;
+
+  const digito = (ate: number): number => {
+    let soma = 0;
+    for (let i = 0; i < ate; i++) {
+      soma += Number(limpo[i]) * (ate + 1 - i);
+    }
+    const resto = (soma * 10) % 11;
+    return resto === 10 ? 0 : resto;
+  };
+
+  return digito(9) === Number(limpo[9]) && digito(10) === Number(limpo[10]);
+}
+
+/** Confere se a data está completa e é um dia real do calendário. */
+export function dataBREhValida(data: string): boolean {
+  const m = String(data || '').match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return false;
+  const [, d, mes, ano] = m.map(Number) as unknown as [string, number, number, number];
+  if (mes < 1 || mes > 12 || d < 1) return false;
+  const anoAtual = new Date().getFullYear();
+  if (ano < 1900 || ano > anoAtual) return false;
+  return d <= new Date(ano, mes, 0).getDate();
+}
+
 /** Máscara de data enquanto o usuário digita: 00/00/0000 */
 export function formatarDataBR(valor: string): string {
   return String(valor || '')

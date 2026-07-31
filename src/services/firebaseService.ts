@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, onAuthStateChanged, User } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, setPersistence, inMemoryPersistence, onAuthStateChanged, User } from 'firebase/auth';
 import { emailSinteticoDoCpf } from '../lib/identity';
 import { getFirestore, setDoc, getDocs, collection, query, where, serverTimestamp, getDocFromServer, doc as firestoreDoc, updateDoc, addDoc, onSnapshot, orderBy, limit, deleteDoc, writeBatch } from 'firebase/firestore';
 import { Receivable } from './sheetsService';
@@ -71,6 +71,20 @@ export async function testConnection() {
 }
 
 /**
+ * Nenhuma sessão sobrevive ao fechamento nem à recarga da página: a senha é
+ * pedida toda vez. Decisão de produto (2026-07-31), na mesma linha da remoção
+ * da sessão de 8h — atrito é intencional aqui.
+ *
+ * `inMemoryPersistence` casa com o resto do desenho: o portão de acesso já
+ * vive só na memória do React e exige token novo a cada carregamento. Guardar
+ * a sessão do Firebase além disso não daria conveniência nenhuma, porque o
+ * portão bloquearia a página antes.
+ */
+const persistenciaPronta = setPersistence(auth, inMemoryPersistence).catch((err) => {
+  console.error('Falha ao configurar persistência de sessão:', err);
+});
+
+/**
  * Login por CPF e senha.
  *
  * O identificador da credencial no Firebase é derivado do CPF e montado AQUI,
@@ -82,12 +96,15 @@ export async function signInWithCpfSenha(cpf: string, senha: string) {
   if (!identificador) {
     throw new Error('CPF inválido.');
   }
+  // Sem esperar, uma sessão poderia ser gravada antes de a política valer.
+  await persistenciaPronta;
   const result = await signInWithEmailAndPassword(auth, identificador, senha);
   return result.user;
 }
 
 export async function signInWithGoogle() {
   try {
+    await persistenciaPronta;
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
   } catch (error) {

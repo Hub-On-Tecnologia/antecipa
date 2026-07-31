@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { LogIn, Loader2, AlertCircle, CheckCircle2, KeyRound, UserPlus, ArrowLeft } from 'lucide-react';
 import { signInWithCpfSenha } from '../services/firebaseService';
 import { solicitarPrimeiroAcesso, solicitarRecuperacaoSenha } from '../services/sheetsService';
-import { cn, formatarCPF, formatarDataBR } from '../lib/utils';
+import { cn, formatarCPF, formatarDataBR, cpfEhValido, dataBREhValida } from '../lib/utils';
 
 /**
  * Acesso do corretor por CPF e senha.
@@ -33,26 +33,50 @@ export default function AcessoSenha() {
   };
 
   /**
-   * O Firebase distingue "usuário não existe" de "senha errada", e repassar
-   * isso confirmaria quais CPFs têm cadastro. A mensagem é única de propósito.
+   * Mensagens de falha do Firebase.
+   *
+   * Tudo que NÃO revela existência de cadastro vira mensagem específica —
+   * conexão, excesso de tentativas, provedor desligado. Só o par
+   * usuário-inexistente / senha-errada permanece genérico: o Firebase
+   * distingue os dois, e repassar a diferença confirmaria quais CPFs têm
+   * cadastro no portal.
    */
   const mensagemDeErro = (codigo: string): string => {
-    if (codigo === 'auth/too-many-requests') {
-      return 'Muitas tentativas. Aguarde alguns minutos antes de tentar de novo.';
+    switch (codigo) {
+      case 'auth/too-many-requests':
+        return 'Muitas tentativas seguidas. Aguarde alguns minutos antes de tentar de novo.';
+      case 'auth/operation-not-allowed':
+        return 'O acesso por senha ainda não está habilitado. Fale com o administrativo.';
+      case 'auth/network-request-failed':
+        return 'Falha de conexão. Verifique sua internet e tente de novo.';
+      case 'auth/internal-error':
+        return 'Instabilidade no serviço de autenticação. Tente novamente em instantes.';
+      case 'auth/user-disabled':
+        return 'Este acesso está desativado. Fale com o administrativo.';
+      default:
+        return 'CPF ou senha incorretos.';
     }
-    if (codigo === 'auth/operation-not-allowed') {
-      return 'O acesso por senha ainda não está habilitado.';
+  };
+
+  /** Erros de preenchimento são aritméticos: não consultam nada, não vazam nada. */
+  const erroDePreenchimento = (checarSenha: boolean, checarDados: boolean): string | null => {
+    if (!cpf.trim()) return 'Informe o CPF.';
+    if (!cpfEhValido(cpf)) return 'CPF inválido. Confira os números digitados.';
+    if (checarSenha && !senha) return 'Informe a senha.';
+    if (checarDados) {
+      if (!nome.trim()) return 'Informe o nome completo.';
+      if (nome.trim().split(/\s+/).length < 2) return 'Informe o nome completo, com sobrenome.';
+      if (!dataNascimento.trim()) return 'Informe a data de nascimento.';
+      if (!dataBREhValida(dataNascimento)) return 'Data de nascimento inválida. Use o formato 00/00/0000.';
     }
-    if (codigo === 'auth/network-request-failed') {
-      return 'Falha de conexão. Verifique sua internet e tente de novo.';
-    }
-    return 'CPF ou senha incorretos.';
+    return null;
   };
 
   const entrar = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!cpf || !senha) {
-      setMensagem('Informe o CPF e a senha.');
+    const problema = erroDePreenchimento(true, false);
+    if (problema) {
+      setMensagem(problema);
       setStatus('erro');
       return;
     }
@@ -70,8 +94,9 @@ export default function AcessoSenha() {
 
   const pedirPrimeiroAcesso = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!nome.trim() || !dataNascimento || !cpf) {
-      setMensagem('Preencha nome, data de nascimento e CPF.');
+    const problema = erroDePreenchimento(false, true);
+    if (problema) {
+      setMensagem(problema);
       setStatus('erro');
       return;
     }
@@ -79,14 +104,29 @@ export default function AcessoSenha() {
     setStatus('loading');
     setMensagem('');
     const r = await solicitarPrimeiroAcesso(nome, dataNascimento, cpf);
-    setMensagem(r.message);
-    setStatus(r.ok ? 'enviado' : 'erro');
+
+    if (!r.ok) {
+      setMensagem(r.message);
+      setStatus('erro');
+      return;
+    }
+
+    // Volta para a tela de entrar: o próximo passo do corretor é abrir o link,
+    // criar a senha e fazer o login. Deixá-lo parado no formulário sugeriria
+    // que ainda falta algo a preencher aqui.
+    setModo('entrar');
+    setNome('');
+    setDataNascimento('');
+    setSenha('');
+    setMensagem(`${r.message} Depois de criar a senha, entre abaixo com seu CPF.`);
+    setStatus('enviado');
   };
 
   const pedirRecuperacao = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!cpf) {
-      setMensagem('Informe o CPF.');
+    const problema = erroDePreenchimento(false, false);
+    if (problema) {
+      setMensagem(problema);
       setStatus('erro');
       return;
     }
@@ -94,8 +134,17 @@ export default function AcessoSenha() {
     setStatus('loading');
     setMensagem('');
     const r = await solicitarRecuperacaoSenha(cpf);
-    setMensagem(r.message);
-    setStatus(r.ok ? 'enviado' : 'erro');
+
+    if (!r.ok) {
+      setMensagem(r.message);
+      setStatus('erro');
+      return;
+    }
+
+    setModo('entrar');
+    setSenha('');
+    setMensagem(`${r.message} Depois de redefinir, entre abaixo com seu CPF.`);
+    setStatus('enviado');
   };
 
   const carregando = status === 'loading';
