@@ -269,25 +269,25 @@ ligado até o passo 8.
 
 [ ] Task 7  Piloto: 3 a 5 corretores reais fazendo o primeiro acesso ponta a
             ponta, com acompanhamento.
+            ADIADA por decisão do Pedro (2026-07-31): não acontece agora.
+            Depende da Task 10 para não expor corretor a link que cai em spam.
             Risco: baixo
 
-[~] Task 8  Corte do Google. → CÓDIGO CONCLUÍDO, CONSOLE PENDENTE.
-            FEITO: removido do caminho do corretor (c5e9def), removido o
-            resíduo órfão (553d6d4) e removida a tela de gerar código, que
-            era o último ponto que pedia Google (4ec7954). Não existe mais
-            nenhuma chamada a Google em src/.
-            FALTA: desabilitar o provedor google.com no Console do Firebase.
-            Conferido em 2026-07-31 pela API: ainda está `enabled=true`.
-            Enquanto ficar ligado, é uma porta de autenticação sem nenhuma
-            tela que a use — não dá acesso a dado, porque o vínculo do CPF
-            já foi transferido para a conta de senha, mas é superfície à toa.
+[x] Task 8  Corte do Google. → CONCLUÍDA.
+            Provedor google.com desabilitado no Console pelo Pedro em
+            2026-07-31 e conferido pela API: `enabled=false`.
+            Código: removido do caminho do corretor (c5e9def), resíduo órfão
+            limpo (553d6d4) e tela de gerar código removida (4ec7954), que era
+            o último ponto que pedia Google.
 
-[ ] Task 9  Limpeza: os access_tokens expirados nunca são apagados.
-            Eram 8 em 30/07 e são 10 em 31/07 — cresce a cada código emitido
-            que ninguém consome. Definir TTL no Firestore ou rotina de
-            limpeza. Não é risco de segurança (o consumo confere a validade
-            de 60s), é lixo que só acumula.
-            Risco: baixo
+[x] Task 9  Limpeza dos access_tokens expirados. → CONCLUÍDA.
+            A faxina roda junto com a emissão e na inicialização do servidor,
+            sem agendador e sem configuração invisível no console: o lixo
+            nasce na emissão, então a limpeza acompanha a mesma taxa.
+            Não segura a resposta e nunca lança — falhar em limpar não pode
+            impedir alguém de entrar no portal. Margem de 5 minutos além da
+            validade, para nunca apagar um código ainda válido.
+            Arquivos: server.ts
 ```
 
 ---

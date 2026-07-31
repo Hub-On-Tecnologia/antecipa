@@ -906,6 +906,61 @@ app.post("/api/auth/ativar-vinculo", dualAuthMiddleware, async (req, res) => {
  * Nenhuma leitura de dado, nenhum acesso ao banco, revogável trocando a
  * variável de ambiente sem mexer em mais nada.
  */
+/** Validade do código de acesso. Usada tanto no consumo quanto na limpeza. */
+const VALIDADE_TOKEN_MS = 60_000;
+
+/**
+ * Apaga códigos de acesso que ninguém consumiu.
+ *
+ * O consumo apaga o documento na mesma transação, então o que sobra são os
+ * códigos emitidos e nunca abertos — cada um fica parado para sempre. Não é
+ * risco de segurança, porque o consumo confere a validade de 60 segundos
+ * antes de aceitar; é lixo que só cresce (eram 10 em 31/07/2026).
+ *
+ * A margem é generosa de propósito: apagar um código ainda válido tiraria
+ * alguém do portal sem explicação, enquanto deixá-lo mais alguns minutos não
+ * custa nada.
+ */
+const MARGEM_LIMPEZA_MS = 5 * 60_000;
+
+async function limparTokensExpirados(): Promise<number> {
+  const db = firestore();
+  const limite = new Date(Date.now() - VALIDADE_TOKEN_MS - MARGEM_LIMPEZA_MS);
+
+  // O limite por execução evita que uma limpeza atrasada monte um lote
+  // gigante; o que sobrar sai na emissão seguinte.
+  const vencidos = await db
+    .collection("access_tokens")
+    .where("createdAt", "<", limite)
+    .limit(300)
+    .get();
+
+  if (vencidos.empty) return 0;
+
+  const lote = db.batch();
+  vencidos.docs.forEach((d) => lote.delete(d.ref));
+  await lote.commit();
+  return vencidos.size;
+}
+
+/**
+ * Dispara a limpeza sem segurar quem chamou.
+ *
+ * Falhar em limpar não pode impedir ninguém de entrar no portal, então o erro
+ * só é registrado. A limpeza roda junto com a emissão de propósito: o lixo
+ * nasce exatamente aí, então ela acompanha a geração sem precisar de
+ * agendador nem de configuração invisível no console.
+ */
+function limparTokensEmSegundoPlano(origem: string) {
+  limparTokensExpirados()
+    .then((n) => {
+      if (n > 0) console.log(`[AccessTokens] Limpeza (${origem}) removeu ${n} código(s) expirado(s).`);
+    })
+    .catch((err: any) => {
+      console.error(`[AccessTokens] Falha na limpeza (${origem}):`, err?.message || err);
+    });
+}
+
 function integrationKeyIsValid(recebida: unknown): boolean {
   const esperada = process.env.INTEGRATION_API_KEY || "";
   // Falha fechada: sem chave configurada, esta via simplesmente não existe.
@@ -965,6 +1020,11 @@ app.post("/api/access-tokens", mintLimiter, async (req, res) => {
     });
 
     console.log(`[AccessTokens] Código emitido via=${emissor} token=${tokenId}`);
+
+    // Não é aguardado: a resposta sai na mesma hora e a faxina segue sozinha.
+    // Quem está abrindo o portal não pode esperar por limpeza.
+    limparTokensEmSegundoPlano("emissão");
+
     return res.status(200).json({ tokenId });
   } catch (err: any) {
     console.error("[AccessTokens] Erro ao emitir código de acesso:", err);
@@ -1021,8 +1081,8 @@ app.post("/api/access-tokens/consume", consumeLimiter, async (req, res) => {
 
       const diff = Date.now() - createdTime;
 
-      // Janela de 1 minuto (60000ms) com 5s de tolerância para relógios dessincronizados
-      if (diff >= -5000 && diff <= 60000) {
+      // Janela de 1 minuto com 5s de tolerância para relógios dessincronizados
+      if (diff >= -5000 && diff <= VALIDADE_TOKEN_MS) {
         return { valid: true, error: "" };
       }
       return { valid: false, error: "Token de acesso expirado." };
@@ -1332,6 +1392,9 @@ async function setupVite() {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`[Server] Running on http://localhost:${PORT}`);
+    // Zera o acumulado de códigos nunca consumidos. Sem isto, um período sem
+    // emissão nenhuma deixaria o lixo antigo parado indefinidamente.
+    limparTokensEmSegundoPlano("inicialização");
   });
 }
 
