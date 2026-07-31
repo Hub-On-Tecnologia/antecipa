@@ -224,6 +224,68 @@ function gerarLinkAcesso() {
             </p>
           </div>
 
+          {/* Resumo da revisão — leitura obrigatória para quem já implementou */}
+          <div className={cn(
+            "p-5 rounded-sm border space-y-3",
+            theme === 'dark' ? "bg-amber-500/[0.05] border-amber-500/30" : "bg-amber-50 border-amber-300"
+          )}>
+            <div className="flex items-start justify-between gap-3">
+              <h4 className="text-xs font-bold text-amber-500 uppercase tracking-wider flex items-center gap-2">
+                <Settings size={12} />
+                <span>Já implementou? Leia isto</span>
+              </h4>
+              <span className={cn(
+                "text-[9px] uppercase tracking-widest font-bold px-2 py-0.5 rounded-sm shrink-0",
+                theme === 'dark' ? "bg-white/10 text-white/70" : "bg-white text-slate-600"
+              )}>
+                Rev. 31/07/2026
+              </span>
+            </div>
+
+            <p className={cn(
+              "text-[11px] leading-relaxed",
+              theme === 'dark' ? "text-white/70" : "text-slate-600"
+            )}>
+              O portal mudou de autenticação. Se o seu código foi escrito contra a versão anterior deste guia,
+              estes são os pontos que precisam de ajuste:
+            </p>
+
+            <ul className={cn(
+              "text-[11px] leading-relaxed space-y-2",
+              theme === 'dark' ? "text-white/60" : "text-slate-600"
+            )}>
+              <li>
+                <strong className={theme === 'dark' ? "text-white" : "text-slate-800"}>Troque Custom Tab por WebView.</strong>{' '}
+                O que era proibido virou o caminho indicado. Detalhes abaixo.
+              </li>
+              <li>
+                <strong className={theme === 'dark' ? "text-white" : "text-slate-800"}>Remova o tratamento de OAuth.</strong>{' '}
+                Não há mais login Google. Desvios de <code>accounts.google.com</code> para Custom Tab ou
+                SFSafariViewController viraram código morto.
+              </li>
+              <li>
+                <strong className={theme === 'dark' ? "text-white" : "text-slate-800"}>Pare de alterar o User-Agent.</strong>{' '}
+                O <code>.replace("; wv", "")</code> existia por causa do OAuth.
+              </li>
+              <li>
+                <strong className={theme === 'dark' ? "text-white" : "text-slate-800"}>Chave inválida agora responde 403</strong>{' '}
+                (antes 401). Se o seu código trata 401, ele não vai mais cair no ramo certo.
+              </li>
+              <li>
+                <strong className={theme === 'dark' ? "text-white" : "text-slate-800"}>Ligue o DOM Storage</strong> na
+                WebView. O Firebase Auth precisa dele; sem isso o login não completa.
+              </li>
+            </ul>
+
+            <p className={cn(
+              "text-[11px] leading-relaxed pt-1",
+              theme === 'dark' ? "text-white/50" : "text-slate-500"
+            )}>
+              O contrato da API — endpoint, header e formato da resposta — <strong>não mudou</strong>. Se o seu
+              backend já emite códigos, ele continua funcionando sem alteração.
+            </p>
+          </div>
+
           {/* Core Concept Breakdown */}
           <div className="space-y-4">
             <h3 className="text-xs uppercase tracking-wider font-bold opacity-60">Como funciona o fluxo?</h3>
@@ -434,6 +496,14 @@ Seu servidor chama <code>POST /api/access-tokens</code> com o header <code>X-Int
               )}>
                 Nunca embuta a chave no aplicativo nem em código que roda no dispositivo: qualquer pessoa consegue extrair strings
                 de um APK. O app pede o link ao <strong>seu backend</strong>, e é o backend que guarda a chave e chama nossa API.
+              </p>
+              <p className={cn(
+                "text-[11px] leading-relaxed",
+                theme === 'dark' ? "text-white/50" : "text-slate-500"
+              )}>
+                Isso é reforçado pelo próprio endpoint: ele <strong>não devolve cabeçalhos CORS</strong>. Uma tentativa de
+                chamá-lo direto do app ou de uma página é bloqueada pelo navegador antes mesmo de sair. Não é falha — é o
+                desenho. A emissão acontece servidor-a-servidor, onde CORS não se aplica.
               </p>
             </div>
 
