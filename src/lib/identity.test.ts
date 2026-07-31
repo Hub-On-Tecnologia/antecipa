@@ -9,6 +9,7 @@ import {
   emailSinteticoDoCpf,
   DOMINIO_CORRETOR,
   atendePoliticaSenha,
+  emailsDoCorretor,
 } from './identity';
 
 /** Linha típica do MariaDB, com os nomes de coluna reais da base. */
@@ -231,6 +232,48 @@ describe('emailSinteticoDoCpf — identificador de login por CPF', () => {
     // O domínio é só identificador interno do Firebase; se apontasse para um
     // servidor de e-mail real, o CPF viraria endereço público.
     expect(DOMINIO_CORRETOR).toBe('corretor.antecipa.com.br');
+  });
+});
+
+describe('emailsDoCorretor — destinos do link de acesso', () => {
+  it('junta os três campos de e-mail da base', () => {
+    const r = emailsDoCorretor({
+      email: 'joao@empresa.com',
+      email_contato: 'joao.silva@gmail.com',
+      email_social: 'jsilva@outlook.com',
+    });
+    expect(r).toHaveLength(3);
+    expect(r).toContain('joao@empresa.com');
+    expect(r).toContain('jsilva@outlook.com');
+  });
+
+  it('não repete o mesmo endereço escrito de formas diferentes', () => {
+    const r = emailsDoCorretor({
+      email: 'Joao@Empresa.com',
+      email_contato: ' joao@empresa.com ',
+      email_social: 'joao@empresa.com',
+    });
+    expect(r).toEqual(['joao@empresa.com']);
+  });
+
+  it('descarta lixo que a base tem nesses campos', () => {
+    // Enviar para esses valores só geraria bounce.
+    const r = emailsDoCorretor({ email: '-', email_contato: 'não tem', email_social: '' });
+    expect(r).toEqual([]);
+  });
+
+  it('descarta o identificador sintético, que não é caixa postal', () => {
+    const r = emailsDoCorretor({
+      email: `12345678909@${DOMINIO_CORRETOR}`,
+      email_contato: 'real@empresa.com',
+    });
+    expect(r).toEqual(['real@empresa.com']);
+  });
+
+  it('devolve lista vazia para corretor sem e-mail, sem estourar', () => {
+    // São 3 dos 91 ativos: viram exceção operacional, não erro.
+    expect(emailsDoCorretor({})).toEqual([]);
+    expect(emailsDoCorretor(null as any)).toEqual([]);
   });
 });
 

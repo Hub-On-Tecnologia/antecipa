@@ -63,6 +63,36 @@ export function cpfDaLinha(row: Record<string, any>): string {
 export const DOMINIO_CORRETOR = 'corretor.antecipa.com.br';
 
 /**
+ * Todos os e-mails distintos do corretor, para onde o link de acesso é
+ * enviado.
+ *
+ * A base tem três campos (`email`, `email_contato`, `email_social`) e não há
+ * como saber qual o corretor lê. Perguntar "qual desses é o seu?" na tela
+ * resolveria a dúvida entregando o dado: quem chegou ali digitou CPF, nome e
+ * nascimento — informações que circulam em vazamentos —, e a lista de opções
+ * revelaria o e-mail em vez de exigir posse dele. Enviar para todos resolve
+ * sem perguntar e sem mostrar nada.
+ *
+ * O identificador sintético é descartado de propósito: ele não existe como
+ * caixa postal.
+ */
+export function emailsDoCorretor(row: Record<string, any>): string[] {
+  const brutos = [row?.email, row?.EMAIL, row?.email_contato, row?.email_social];
+  const vistos = new Set<string>();
+
+  for (const bruto of brutos) {
+    const limpo = String(bruto ?? '').trim().toLowerCase();
+    // Filtro mínimo de formato: a base tem campos preenchidos com traço,
+    // "não tem" e afins, que só gerariam bounce.
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(limpo)) continue;
+    if (limpo.endsWith(`@${DOMINIO_CORRETOR}`)) continue;
+    vistos.add(limpo);
+  }
+
+  return Array.from(vistos);
+}
+
+/**
  * Política de senha configurada no Console do Firebase: mínimo de 8, com
  * minúscula, maiúscula e número.
  *

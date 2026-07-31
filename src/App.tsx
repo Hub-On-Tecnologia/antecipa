@@ -658,30 +658,12 @@ export default function App() {
               </div>
 
               <div className="space-y-6">
-                {!firebaseUser ? (
-                  <div className="flex flex-col gap-4">
-                    {/* Caminho antigo, mantido lado a lado durante a transição.
-                        Sai na Task 8, quando o provedor Google for desligado. */}
-                    <div className="flex items-center gap-4 text-[10px] font-bold tracking-widest text-black/30">
-                      <div className="w-2 h-2 rounded-full bg-black/20"></div>
-                      <span>OUTRA FORMA DE ENTRAR</span>
-                    </div>
-                    <button
-                      onClick={handleGoogleSignIn}
-                      className="flex items-center justify-center gap-3 bg-white text-black/60 py-4 text-[10px] uppercase tracking-[0.3em] font-bold rounded-sm border border-black/10 hover:border-black/30 hover:text-black transition-all group"
-                    >
-                      <LogIn size={14} className="group-hover:translate-x-1 transition-transform" />
-                      Login com Google
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-4 text-[10px] font-bold tracking-widest text-emerald-600">
-                    <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
-                    <span>GOOGLE AUTH: CONECTADO</span>
-                  </div>
-                )}
+                <div className="flex items-center gap-4 text-[10px] font-bold tracking-widest text-amber-600">
+                  <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
+                  <span>{firebaseUser ? 'SESSÃO ATIVA' : 'CONEXÃO SEGURA PENDENTE'}</span>
+                </div>
                  <p className="text-[10px] uppercase tracking-[0.2em] text-black/25 leading-relaxed font-medium">
-                  Acesso restrito ao quadro de colaboradores. Use seu CPF e senha; o login com Google segue disponível durante a transição.
+                  Acesso restrito ao quadro de colaboradores. Entre com o CPF e a senha cadastrada; a senha é pedida a cada acesso.
                 </p>
                 
                 <div className="pt-4 border-t border-black/5 flex flex-col gap-0.5 text-[9px] text-black/30 font-semibold uppercase tracking-wider">

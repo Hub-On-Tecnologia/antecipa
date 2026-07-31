@@ -16,7 +16,7 @@ import { normalizeCPF } from "./src/lib/utils";
 // poder ser testada sem subir o servidor.
 import {
   isUserAllowed, maskCpf, cpfDaLinha, mapCorretor, matchCorretor, acharPorCpf,
-  emailSinteticoDoCpf, DOMINIO_CORRETOR, atendePoliticaSenha,
+  emailSinteticoDoCpf, DOMINIO_CORRETOR, atendePoliticaSenha, emailsDoCorretor,
   TokenIdentidade,
 } from "./src/lib/identity";
 
@@ -619,8 +619,21 @@ app.post("/api/auth/register-request", senhaLimiter, async (req, res) => {
     const nomeBase = String(encontrado.nome || encontrado.NOME || encontrado.nome_corretor || "");
     await registrarPendencia(preparada.uid, alvoCpf, nomeBase);
 
-    // Task 4 substitui este ponto pelo envio ao contato cadastrado.
-    console.log(`[AuthSenha] Link de ativação gerado cpf=${maskCpf(alvoCpf)} uid=${preparada.uid}`);
+    // Decisão de 2026-07-31: envia para TODOS os e-mails do cadastro, em vez
+    // de perguntar ao corretor qual é o dele — a pergunta entregaria o dado a
+    // quem só sabe CPF, nome e nascimento.
+    const destinos = emailsDoCorretor(encontrado);
+
+    // Task 4 substitui este ponto pelo envio de fato.
+    console.log(
+      `[AuthSenha] Link de ativação gerado cpf=${maskCpf(alvoCpf)} uid=${preparada.uid} destinos=${destinos.length}`,
+    );
+    if (destinos.length === 0) {
+      // 3 dos 91 corretores ativos estão nessa situação (Task 0). Não é erro
+      // de sistema: é cadastro incompleto, que o administrativo precisa
+      // corrigir no CRM antes de o corretor conseguir entrar.
+      console.warn(`[AuthSenha] Corretor sem e-mail no cadastro cpf=${maskCpf(alvoCpf)}`);
+    }
     if (LOG_LINK_ATIVACAO) console.log(`[AuthSenha][DEBUG] ${preparada.link}`);
 
     return res.status(200).json(RESPOSTA_GENERICA);
@@ -647,17 +660,20 @@ app.post("/api/auth/reset-request", senhaLimiter, async (req, res) => {
     const rows = await fetchCorretoresAtivos();
 
     // Corretor precisa estar ATIVO: desligado no CRM não recupera acesso.
-    if (!acharPorCpf(rows, alvoCpf)) {
+    const linha = acharPorCpf(rows, alvoCpf);
+    if (!linha) {
       console.warn(`[AuthSenha] Reset negado cpf=${maskCpf(String(cpf))} ip=${req.ip}`);
       return res.status(200).json(RESPOSTA_GENERICA);
     }
+
+    const destinos = emailsDoCorretor(linha);
 
     const identificador = emailSinteticoDoCpf(alvoCpf, DOMINIO_CREDENCIAL);
     if (!identificador) return res.status(200).json(RESPOSTA_GENERICA);
 
     try {
       const link = await getAuth().generatePasswordResetLink(identificador);
-      console.log(`[AuthSenha] Link de recuperação gerado cpf=${maskCpf(alvoCpf)}`);
+      console.log(`[AuthSenha] Link de recuperação gerado cpf=${maskCpf(alvoCpf)} destinos=${destinos.length}`);
       if (LOG_LINK_ATIVACAO) console.log(`[AuthSenha][DEBUG] ${link}`);
     } catch (err: any) {
       // Corretor ativo que nunca se cadastrou cai aqui. Não é erro: a resposta
