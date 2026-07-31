@@ -271,17 +271,22 @@ ligado até o passo 8.
             ponta, com acompanhamento.
             Risco: baixo
 
-[~] Task 8  Corte do Google. → ANTECIPADA E PARCIAL.
-            FEITO: removido do caminho do corretor (commit c5e9def), porque
-            manter o botão seria deixar um caminho que quebra dentro da
-            WebView — o motivo de toda esta mudança.
-            FALTA: o painel de gerar token (admin) ainda usa Google. Não roda
-            na WebView e está dormente (allowlist de admin vazia), mas precisa
-            de decisão antes de desabilitar o provedor no Console.
-            Arquivos: src/App.tsx
+[~] Task 8  Corte do Google. → CÓDIGO CONCLUÍDO, CONSOLE PENDENTE.
+            FEITO: removido do caminho do corretor (c5e9def), removido o
+            resíduo órfão (553d6d4) e removida a tela de gerar código, que
+            era o último ponto que pedia Google (4ec7954). Não existe mais
+            nenhuma chamada a Google em src/.
+            FALTA: desabilitar o provedor google.com no Console do Firebase.
+            Conferido em 2026-07-31 pela API: ainda está `enabled=true`.
+            Enquanto ficar ligado, é uma porta de autenticação sem nenhuma
+            tela que a use — não dá acesso a dado, porque o vínculo do CPF
+            já foi transferido para a conta de senha, mas é superfície à toa.
 
-[ ] Task 9  Limpeza: os access_tokens expirados nunca são apagados (8 parados
-            na coleção hoje). Definir TTL ou rotina de limpeza.
+[ ] Task 9  Limpeza: os access_tokens expirados nunca são apagados.
+            Eram 8 em 30/07 e são 10 em 31/07 — cresce a cada código emitido
+            que ninguém consome. Definir TTL no Firestore ou rotina de
+            limpeza. Não é risco de segurança (o consumo confere a validade
+            de 60s), é lixo que só acumula.
             Risco: baixo
 ```
 
