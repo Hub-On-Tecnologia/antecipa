@@ -16,7 +16,14 @@ import { cn, formatarCPF, formatarDataBR, cpfEhValido, dataBREhValida } from '..
  */
 type Modo = 'entrar' | 'primeiro' | 'recuperar';
 
-export default function AcessoSenha() {
+interface AcessoSenhaProps {
+  theme?: 'dark' | 'light';
+  /** Esconde o cabeçalho próprio, para uso dentro de um card que já tem título. */
+  compacto?: boolean;
+}
+
+export default function AcessoSenha({ theme = 'dark', compacto = false }: AcessoSenhaProps) {
+  const escuro = theme === 'dark';
   const [modo, setModo] = useState<Modo>('entrar');
   const [cpf, setCpf] = useState('');
   const [senha, setSenha] = useState('');
@@ -149,26 +156,39 @@ export default function AcessoSenha() {
 
   const carregando = status === 'loading';
 
-  const campo = "w-full bg-white/5 border border-white/10 px-4 py-4 sm:px-5 sm:py-5 rounded-sm focus:outline-none focus:border-white/40 focus:bg-white/[0.08] transition-all text-sm tracking-widest placeholder:text-white/10 disabled:opacity-40";
-  const rotulo = "block text-[10px] uppercase tracking-[0.25em] font-bold text-white/40 ml-0.5";
+  const campo = cn(
+    "w-full border px-4 py-4 sm:px-5 sm:py-5 rounded-sm focus:outline-none transition-all text-sm tracking-widest disabled:opacity-40",
+    escuro
+      ? "bg-white/5 border-white/10 text-white focus:border-white/40 focus:bg-white/[0.08] placeholder:text-white/10"
+      : "bg-slate-50 border-slate-250 text-slate-900 focus:border-slate-400 focus:bg-white placeholder:text-slate-300",
+  );
+  const rotulo = cn(
+    "block text-[10px] uppercase tracking-[0.25em] font-bold ml-0.5",
+    escuro ? "text-white/40" : "text-slate-500",
+  );
   const botao = "w-full py-6 font-bold uppercase tracking-[0.3em] text-[11px] transition-all flex items-center justify-center gap-3 rounded-sm";
-  const link = "text-[10px] uppercase tracking-[0.2em] font-bold text-white/40 hover:text-white transition-colors flex items-center gap-2";
+  const link = cn(
+    "text-[10px] uppercase tracking-[0.2em] font-bold transition-colors flex items-center gap-2",
+    escuro ? "text-white/40 hover:text-white" : "text-slate-500 hover:text-slate-900",
+  );
 
   return (
     <div className="w-full max-w-lg">
       <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }}>
-        <div className="mb-8 sm:mb-12">
-          <h2 className="text-3xl font-semibold mb-3 tracking-tight">
-            {modo === 'entrar' && 'Acesso ao Portal'}
-            {modo === 'primeiro' && 'Primeiro Acesso'}
-            {modo === 'recuperar' && 'Recuperar Senha'}
-          </h2>
-          <p className="text-sm text-white/40 tracking-wide font-medium">
-            {modo === 'entrar' && 'Entre com seu CPF e a senha cadastrada.'}
-            {modo === 'primeiro' && 'Confirme seus dados. O link para criar a senha será enviado para o contato do seu cadastro.'}
-            {modo === 'recuperar' && 'Informe seu CPF. O link será enviado para o contato do seu cadastro.'}
-          </p>
-        </div>
+        {!compacto && (
+          <div className="mb-8 sm:mb-12">
+            <h2 className="text-3xl font-semibold mb-3 tracking-tight">
+              {modo === 'entrar' && 'Acesso ao Portal'}
+              {modo === 'primeiro' && 'Primeiro Acesso'}
+              {modo === 'recuperar' && 'Recuperar Senha'}
+            </h2>
+            <p className={cn("text-sm tracking-wide font-medium", escuro ? "text-white/40" : "text-slate-500")}>
+              {modo === 'entrar' && 'Entre com seu CPF e a senha cadastrada.'}
+              {modo === 'primeiro' && 'Confirme seus dados. O link para criar a senha será enviado para o contato do seu cadastro.'}
+              {modo === 'recuperar' && 'Informe seu CPF. O link será enviado para o contato do seu cadastro.'}
+            </p>
+          </div>
+        )}
 
         <AnimatePresence mode="wait">
           <motion.form
@@ -272,8 +292,12 @@ export default function AcessoSenha() {
                 className={cn(
                   botao,
                   carregando
-                    ? 'bg-white/10 text-white/40 cursor-not-allowed'
-                    : 'bg-white text-[#0A0A0A] hover:bg-white/90 active:scale-[0.99] shadow-[0_0_30px_rgba(255,255,255,0.05)]',
+                    ? escuro
+                      ? 'bg-white/10 text-white/40 cursor-not-allowed'
+                      : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                    : escuro
+                      ? 'bg-white text-[#0A0A0A] hover:bg-white/90 active:scale-[0.99] shadow-[0_0_30px_rgba(255,255,255,0.05)]'
+                      : 'bg-slate-950 text-white hover:bg-slate-800 active:scale-[0.99] shadow-md',
                 )}
               >
                 {carregando ? (
@@ -296,7 +320,10 @@ export default function AcessoSenha() {
           </motion.form>
         </AnimatePresence>
 
-        <div className="mt-8 pt-6 border-t border-white/5 flex flex-col sm:flex-row gap-4 sm:justify-between">
+        <div className={cn(
+          "mt-8 pt-6 border-t flex flex-col sm:flex-row gap-4 sm:justify-between",
+          escuro ? "border-white/5" : "border-slate-200",
+        )}>
           {modo === 'entrar' ? (
             <>
               <button type="button" onClick={() => trocarModo('primeiro')} className={link}>

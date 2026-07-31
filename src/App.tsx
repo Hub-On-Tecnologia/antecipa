@@ -5,7 +5,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { LogOut, Shield, LogIn, ArrowRight, Sun, Moon, Lock, ShieldAlert, Key, Sparkles, Loader2, RefreshCw, Terminal } from 'lucide-react';
+import { LogOut, Shield, ArrowRight, Sun, Moon, Lock, ShieldAlert, Key, Sparkles, Loader2, RefreshCw, Terminal } from 'lucide-react';
 import LoginForm from './components/LoginForm';
 import AcessoSenha from './components/AcessoSenha';
 import Dashboard from './components/Dashboard';
@@ -15,7 +15,7 @@ import QAPanel from './components/QAPanel';
 import { UserAuth } from './services/bitrixService';
 import { fetchCurrentBroker, ativarVinculoPendente } from './services/sheetsService';
 import { cn } from './lib/utils';
-import { auth, onAuthStateChanged, signInWithGoogle, User } from './services/firebaseService';
+import { auth, onAuthStateChanged, User } from './services/firebaseService';
 
 export default function App() {
   const [userAuthData, setUserAuthData] = useState<UserAuth | null>(null);
@@ -23,7 +23,12 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   // Enquanto o servidor resolve o vínculo, não sabemos ainda se o corretor
   // precisa ou não confirmar identidade — evita piscar o formulário à toa.
-  const [isResolvingBroker, setIsResolvingBroker] = useState(false);
+  //
+  // Começa FALSO e só vira verdadeiro quando a consulta termina. Se fosse o
+  // contrário, existiria um quadro entre o login e a execução do efeito em que
+  // a tela de confirmação apareceria por um instante, mesmo para quem já tem
+  // vínculo. Era exatamente o que acontecia.
+  const [vinculoResolvido, setVinculoResolvido] = useState(false);
   const [isValidatingToken, setIsValidatingToken] = useState(false);
   const [isGeneratingToken, setIsGeneratingToken] = useState(false);
   const [isQAPanelOpen, setIsQAPanelOpen] = useState(false);
@@ -62,11 +67,12 @@ export default function App() {
   useEffect(() => {
     if (!firebaseUser) {
       setUserAuthData(null);
+      setVinculoResolvido(false);
       return;
     }
 
     let cancelled = false;
-    setIsResolvingBroker(true);
+    setVinculoResolvido(false);
 
     (async () => {
       try {
@@ -89,7 +95,7 @@ export default function App() {
       } catch (err) {
         console.error('Erro ao resolver identidade do corretor:', err);
       } finally {
-        if (!cancelled) setIsResolvingBroker(false);
+        if (!cancelled) setVinculoResolvido(true);
       }
     })();
 
@@ -196,18 +202,10 @@ export default function App() {
     auth.signOut();
   };
 
-  const handleGoogleSignIn = async () => {
-    try {
-      await signInWithGoogle();
-    } catch (error) {
-      console.error('Falha no login Google', error);
-    }
-  };
-
   // Emissão de token no servidor via POST /api/access-tokens
   const handleGenerateAndRedirect = async () => {
     if (!firebaseUser) {
-      alert('Sessão expirada. Faça login com o Google primeiro.');
+      alert('Sessão expirada. Entre novamente com CPF e senha.');
       return;
     }
     setIsGeneratingToken(true);
@@ -315,16 +313,14 @@ export default function App() {
                     "text-xs leading-relaxed max-w-md mx-auto",
                     theme === 'dark' ? "text-white/55" : "text-slate-500"
                   )}>
-                    Você deve fazer login com sua conta Google corporativa autorizada antes de gerar tokens de acesso.
+                    Entre com o CPF e a senha da sua conta autorizada antes de gerar códigos de acesso.
                   </p>
                 </div>
-                <button
-                  onClick={handleGoogleSignIn}
-                  className="w-full py-5 font-bold uppercase tracking-[0.2em] text-[11px] bg-white text-black hover:bg-white/90 transition-all flex items-center justify-center gap-3 rounded-sm shadow-lg"
-                >
-                  <LogIn size={16} />
-                  <span>Login com Google</span>
-                </button>
+                {/* Mesmo acesso do corretor. A allowlist do servidor é que
+                    decide quem pode gerar código — entrar aqui não basta. */}
+                <div className="text-left">
+                  <AcessoSenha theme={theme} compacto />
+                </div>
               </div>
             ) : isCheckingAllowlist ? (
               <div className="py-12 space-y-4">
@@ -675,12 +671,24 @@ export default function App() {
 
             {/* Main Login Pane */}
             <div className="flex-1 flex items-center justify-center p-6 sm:p-12 md:p-20 bg-[#0A0A0A]">
-              {/* Sem sessão: acesso por CPF e senha, que cobre 100% do quadro.
-                  Com sessão Google mas sem vínculo: confirmação de identidade
-                  do fluxo antigo, que sai de cena na Task 8. */}
-              {!firebaseUser
-                ? <AcessoSenha />
-                : <LoginForm onLoginSuccess={handleLoginSuccess} />}
+              {/* Sem sessão: acesso por CPF e senha.
+                  Autenticado, mas ainda consultando o vínculo: espera, porque
+                  mostrar a confirmação de identidade aqui faria a tela piscar
+                  para quem já tem vínculo.
+                  Autenticado e sem vínculo: confirmação manual, que é o caso
+                  raro de cadastro cuja pendência se perdeu. */}
+              {!firebaseUser ? (
+                <AcessoSenha />
+              ) : !vinculoResolvido ? (
+                <div className="flex flex-col items-center gap-4 text-white/30">
+                  <Loader2 className="animate-spin" size={32} />
+                  <span className="text-[10px] uppercase tracking-[0.3em] font-bold">
+                    Confirmando seu cadastro...
+                  </span>
+                </div>
+              ) : (
+                <LoginForm onLoginSuccess={handleLoginSuccess} />
+              )}
             </div>
           </motion.div>
         ) : (

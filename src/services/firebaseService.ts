@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, setPersistence, inMemoryPersistence, onAuthStateChanged, User } from 'firebase/auth';
+import { getAuth, signInWithEmailAndPassword, setPersistence, inMemoryPersistence, onAuthStateChanged, User } from 'firebase/auth';
 import { emailSinteticoDoCpf } from '../lib/identity';
 import { getFirestore, setDoc, getDocs, collection, query, where, serverTimestamp, getDocFromServer, doc as firestoreDoc, updateDoc, addDoc, onSnapshot, orderBy, limit, deleteDoc, writeBatch } from 'firebase/firestore';
 import { Receivable } from './sheetsService';
@@ -18,12 +18,6 @@ const firestoreDatabaseId = import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firestoreDatabaseId);
 export const auth = getAuth();
-const googleProvider = new GoogleAuthProvider();
-// Sem isto, o Google reaproveita silenciosamente a última conta usada no
-// navegador — mesmo após signOut() no Firebase, que só encerra NOSSA sessão,
-// não a sessão do próprio Google. Forçar o seletor de conta é o que permite
-// trocar de usuário de fato.
-googleProvider.setCustomParameters({ prompt: 'select_account' });
 
 export enum OperationType {
   CREATE = 'create',
@@ -100,17 +94,6 @@ export async function signInWithCpfSenha(cpf: string, senha: string) {
   await persistenciaPronta;
   const result = await signInWithEmailAndPassword(auth, identificador, senha);
   return result.user;
-}
-
-export async function signInWithGoogle() {
-  try {
-    await persistenciaPronta;
-    const result = await signInWithPopup(auth, googleProvider);
-    return result.user;
-  } catch (error) {
-    console.error('Erro ao fazer login com Google:', error);
-    throw error;
-  }
 }
 
 /**
