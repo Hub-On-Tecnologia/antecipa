@@ -9,6 +9,7 @@ import { initializeApp, cert, getApps, getApp, App } from "firebase-admin/app";
 import { getAuth, DecodedIdToken } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import rateLimit from "express-rate-limit";
+import nodemailer, { Transporter } from "nodemailer";
 // Mesmas funções usadas pelo frontend: a normalização precisa ser idêntica dos
 // dois lados, senão um corretor válido falharia na vinculação.
 import { normalizeCPF } from "./src/lib/utils";
@@ -19,6 +20,7 @@ import {
   emailSinteticoDoCpf, DOMINIO_CORRETOR, atendePoliticaSenha, emailsDoCorretor,
   TokenIdentidade,
 } from "./src/lib/identity";
+import { emailPrimeiroAcesso, emailRecuperacaoSenha, ConteudoEmail } from "./src/lib/emails";
 
 // Load environment variables
 dotenv.config();
@@ -523,6 +525,82 @@ const senhaLimiter = rateLimit({
  * verdade é o corretor, pelo link. Criar sem senha alguma impediria gerar o
  * link de redefinição depois.
  */
+/* --- Envio de e-mail ------------------------------------------------------
+ *
+ * Agnóstico de provedor: qualquer SMTP serve (Gmail com senha de app, Brevo,
+ * Resend, Zoho, o servidor do próprio domínio). Trocar de provedor é trocar as
+ * variáveis do .env, sem tocar em código.
+ *
+ * Sem SMTP configurado, o sistema NÃO quebra: segue gerando o link e registra
+ * no log que não havia canal. Isso mantém o servidor de pé enquanto o domínio
+ * definitivo não é contratado.
+ */
+let transporteEmail: Transporter | null = null;
+let transporteResolvido = false;
+
+function obterTransporte(): Transporter | null {
+  if (transporteResolvido) return transporteEmail;
+  transporteResolvido = true;
+
+  const host = process.env.SMTP_HOST;
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+
+  if (!host || !user || !pass) {
+    console.warn("[Email] SMTP não configurado — nenhum e-mail será enviado.");
+    return null;
+  }
+
+  const port = Number(process.env.SMTP_PORT || 587);
+  transporteEmail = nodemailer.createTransport({
+    host,
+    port,
+    // 465 é TLS implícito; 587 sobe para TLS via STARTTLS.
+    secure: String(process.env.SMTP_SECURE || "").trim() === "1" || port === 465,
+    auth: { user, pass },
+  });
+
+  console.log(`[Email] SMTP configurado host=${host} porta=${port}`);
+  return transporteEmail;
+}
+
+/**
+ * Envia o mesmo conteúdo para cada destino, um a um.
+ *
+ * Separado de propósito: um endereço morto na base não pode impedir a entrega
+ * nos outros, e um e-mail único com três destinatários mostraria a cada caixa
+ * os outros endereços do corretor.
+ *
+ * Nunca lança: falha de e-mail não pode virar erro 500 para o corretor, senão
+ * a resposta deixaria de ser genérica e passaria a revelar quem tem cadastro.
+ */
+async function enviarEmails(destinos: string[], conteudo: ConteudoEmail, contexto: string): Promise<number> {
+  const transporte = obterTransporte();
+  if (!transporte || destinos.length === 0) return 0;
+
+  const remetente = process.env.SMTP_FROM || process.env.SMTP_USER || "";
+  let enviados = 0;
+
+  for (const destino of destinos) {
+    try {
+      await transporte.sendMail({
+        from: remetente,
+        to: destino,
+        subject: conteudo.assunto,
+        text: conteudo.texto,
+        html: conteudo.html,
+      });
+      enviados++;
+    } catch (err: any) {
+      // Só o domínio no log: o endereço completo é dado pessoal.
+      const dominio = destino.split("@")[1] || "?";
+      console.error(`[Email] Falha no envio ${contexto} dominio=${dominio}: ${err.message}`);
+    }
+  }
+
+  return enviados;
+}
+
 /**
  * Senha inicial descartável, que ninguém nunca vê — quem define a senha de
  * verdade é o corretor, pelo link.
@@ -624,16 +702,21 @@ app.post("/api/auth/register-request", senhaLimiter, async (req, res) => {
     // quem só sabe CPF, nome e nascimento.
     const destinos = emailsDoCorretor(encontrado);
 
-    // Task 4 substitui este ponto pelo envio de fato.
-    console.log(
-      `[AuthSenha] Link de ativação gerado cpf=${maskCpf(alvoCpf)} uid=${preparada.uid} destinos=${destinos.length}`,
-    );
     if (destinos.length === 0) {
       // 3 dos 91 corretores ativos estão nessa situação (Task 0). Não é erro
       // de sistema: é cadastro incompleto, que o administrativo precisa
       // corrigir no CRM antes de o corretor conseguir entrar.
       console.warn(`[AuthSenha] Corretor sem e-mail no cadastro cpf=${maskCpf(alvoCpf)}`);
     }
+
+    const enviados = await enviarEmails(
+      destinos,
+      emailPrimeiroAcesso(nomeBase, preparada.link),
+      "primeiro-acesso",
+    );
+    console.log(
+      `[AuthSenha] Primeiro acesso cpf=${maskCpf(alvoCpf)} uid=${preparada.uid} destinos=${destinos.length} enviados=${enviados}`,
+    );
     if (LOG_LINK_ATIVACAO) console.log(`[AuthSenha][DEBUG] ${preparada.link}`);
 
     return res.status(200).json(RESPOSTA_GENERICA);
@@ -673,7 +756,11 @@ app.post("/api/auth/reset-request", senhaLimiter, async (req, res) => {
 
     try {
       const link = await getAuth().generatePasswordResetLink(identificador);
-      console.log(`[AuthSenha] Link de recuperação gerado cpf=${maskCpf(alvoCpf)} destinos=${destinos.length}`);
+      const nomeBase = String(linha.nome || linha.NOME || linha.nome_corretor || "");
+      const enviados = await enviarEmails(destinos, emailRecuperacaoSenha(nomeBase, link), "recuperacao");
+      console.log(
+        `[AuthSenha] Recuperação cpf=${maskCpf(alvoCpf)} destinos=${destinos.length} enviados=${enviados}`,
+      );
       if (LOG_LINK_ATIVACAO) console.log(`[AuthSenha][DEBUG] ${link}`);
     } catch (err: any) {
       // Corretor ativo que nunca se cadastrou cai aqui. Não é erro: a resposta
