@@ -12,3 +12,6 @@ firebase-service-account*.json
 *.pem
 .vps-config
 crítica/
+# Transcrições de sessão do IDE. Não são código, e já carregaram token de
+# webhook do Bitrix colado durante uma conversa — o que virou segredo commitado.
+.antigravity/

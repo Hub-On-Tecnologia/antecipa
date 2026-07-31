@@ -12,7 +12,7 @@ import rateLimit from "express-rate-limit";
 import nodemailer, { Transporter } from "nodemailer";
 // Mesmas funções usadas pelo frontend: a normalização precisa ser idêntica dos
 // dois lados, senão um corretor válido falharia na vinculação.
-import { normalizeCPF } from "./src/lib/utils";
+import { normalizeCPF, normalizeName } from "./src/lib/utils";
 // Lógica de identidade/autorização vive em módulo sem efeito colateral para
 // poder ser testada sem subir o servidor.
 import {
@@ -165,8 +165,42 @@ const consumeLimiter = rateLimit({
   statusCode: 429,
 });
 
-// Enable JSON bodies with a larger limit for base64 file uploads
-app.use(express.json({ limit: "50mb" }));
+/**
+ * Limite de corpo por rota, não global.
+ *
+ * O limite de 50mb valia para TODAS as rotas, inclusive as públicas e sem
+ * autenticação (/api/access-tokens/consume, /api/auth/register-request), onde
+ * o corpo legítimo tem algumas dezenas de bytes. Bastavam poucas requisições
+ * simultâneas de 50mb para estourar a memória do processo — negação de serviço
+ * sem precisar de conta nem de credencial.
+ *
+ * O único corpo grande de verdade é o contrato em base64 que segue para o
+ * Bitrix em /api/bitrix/update. Ele é texto gerado pelo próprio portal
+ * (ProposalModal), na casa de dezenas de KB — 5mb é folga de sobra.
+ *
+ * A ordem importa: o parser da rota específica vem ANTES do global, senão o
+ * global recusaria o contrato com 413 antes de a rota ser alcançada. O
+ * body-parser marca a requisição como já lida, então o global vira no-op ali.
+ */
+app.use("/api/bitrix/update", express.json({ limit: "5mb" }));
+app.use(express.json({ limit: "100kb" }));
+
+/**
+ * Corpo grande demais ou JSON malformado vira resposta JSON limpa.
+ *
+ * Sem isto o Express devolve uma página HTML de erro com caminho de arquivo do
+ * servidor, que ainda por cima o cliente não sabe interpretar — todo o
+ * frontend faz response.json().
+ */
+app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err?.type === "entity.too.large") {
+    return res.status(413).json({ error: "Conteúdo grande demais para esta operação." });
+  }
+  if (err instanceof SyntaxError && "body" in err) {
+    return res.status(400).json({ error: "Corpo da requisição inválido." });
+  }
+  return next(err);
+});
 
 /**
  * Portão de acesso (RS-08): uso único de verdade, sem sessão persistente.
@@ -1209,29 +1243,190 @@ app.get("/api/bitrix/debug", (req, res) => {
 });
 
 // Bitrix API Endpoints Proxy
+/* ------------------------------------------------------------------------- *
+ * PROXY BITRIX — AUTORIZAÇÃO POR OBJETO
+ *
+ * O proxy AUTENTICAVA ("quem é você") mas não AUTORIZAVA o objeto ("este
+ * negócio é seu?"): o corpo da requisição seguia inteiro para o webhook.
+ * Qualquer corretor vinculado podia trocar o filtro e listar TODOS os negócios
+ * do funil — e o comentário de cada um carrega nome e CPF do solicitante — ou
+ * mandar um id alheio para /update e mover a solicitação de outra pessoa.
+ *
+ * Três travas agora:
+ *   1. /list  — o cliente não escolhe mais filtro, categoria nem campos de
+ *               retorno. O servidor monta a consulta e devolve só o que é do
+ *               corretor autenticado.
+ *   2. /get e /update — exigem posse comprovada do negócio.
+ *   3. /update — aceita apenas os campos e estágios que o portal usa. Mover
+ *               para "ganho" deixou de ser possível pelo portal.
+ *
+ * A posse mora em `deal_owners/{dealId}`, escrita SÓ pelo servidor no /add.
+ * `promised_commissions` não serve de prova: é gravável pelo cliente, então
+ * bastaria criar um documento apontando para o negócio da vítima para
+ * "provar" posse dele.
+ * ------------------------------------------------------------------------- */
+
+const BITRIX_CATEGORY_ID = 89;
+/** Precisa casar com PV_FIELD de src/services/bitrixService.ts. */
+const BITRIX_PV_FIELD = "UF_CRM_1758140731010";
+/** Campo do anexo de contrato (BITRIX_FIELDS.FILE_ATTACHMENT no frontend). */
+const BITRIX_FILE_FIELD = "UF_CRM_1749578923";
+/** Únicos estágios que o portal define: anexar contrato e recusar proposta. */
+const ESTAGIOS_PERMITIDOS = ["C89:EXECUTING", "C89:LOSE"];
+/** Campos devolvidos na listagem. Fixos: o cliente não escolhe o que ler. */
+const CAMPOS_LISTA = ["ID", "TITLE", "COMMENTS", "STAGE_ID", BITRIX_PV_FIELD, "UF_CRM_1712601553", "UF_CRM_1712601748"];
+/** Teto de PVs por consulta. Um corretor real tem dezenas. */
+const MAX_PV_POR_CONSULTA = 500;
+const COLECAO_POSSE_DEAL = "deal_owners";
+
+const CABECALHOS_BITRIX = {
+  "Content-Type": "application/json",
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Accept": "application/json, text/plain, */*",
+  "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+};
+
+/** Monta a URL do método a partir dos webhooks configurados. */
+function urlBitrix(metodo: "add" | "list" | "get" | "update"): string | null {
+  const writeUrl = process.env.BITRIX_WEBHOOK_WRITE_URL || process.env.VITE_BITRIX_WEBHOOK_WRITE_URL || "";
+  const listUrl = process.env.BITRIX_LIST_URL || process.env.VITE_BITRIX_LIST_URL || "";
+
+  if (metodo === "add") return writeUrl || null;
+  if (metodo === "list") return listUrl || null;
+
+  const base = writeUrl || listUrl;
+  if (!base) return null;
+  return base
+    .replace("crm.deal.add.json", `crm.deal.${metodo}.json`)
+    .replace("crm.deal.list.json", `crm.deal.${metodo}.json`);
+}
+
+/** Chamada ao webhook com timeout — antes não havia, e um Bitrix lento segurava a requisição para sempre. */
+function chamarBitrix(url: string, corpo: any, timeoutMs = 15000) {
+  return fetch(url, {
+    method: "POST",
+    headers: CABECALHOS_BITRIX,
+    body: JSON.stringify(corpo),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+}
+
+/**
+ * Credencial de servidor e conta administrativa não são escopadas: a primeira
+ * é o próprio backend, e a segunda já enxerga a base inteira por /api/db.
+ */
+function acessoIrrestrito(req: express.Request): boolean {
+  if ((req as any).legacyAuth === true) return true;
+  const user = (req as any).user as DecodedIdToken | undefined;
+  return Boolean(user && isUserAllowed(user));
+}
+
+async function registrarPosseDeal(dealId: string, uid: string, cpf: string, pvId: string) {
+  await firestore().collection(COLECAO_POSSE_DEAL).doc(dealId).set({
+    uid,
+    cpf,
+    pvId,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+}
+
+/** Posse de vários negócios de uma vez — evita uma ida ao Firestore por negócio. */
+async function possesDosDeals(dealIds: string[]): Promise<Map<string, string>> {
+  const mapa = new Map<string, string>();
+  if (dealIds.length === 0) return mapa;
+
+  const db = firestore();
+  for (let i = 0; i < dealIds.length; i += 300) {
+    const lote = dealIds.slice(i, i + 300);
+    const refs = lote.map((id) => db.collection(COLECAO_POSSE_DEAL).doc(id));
+    const snaps = await db.getAll(...refs);
+    snaps.forEach((s) => {
+      if (s.exists) mapa.set(s.id, String(s.data()?.uid || ""));
+    });
+  }
+  return mapa;
+}
+
+/**
+ * Posse dos negócios criados ANTES do registro existir.
+ *
+ * Cai no nome gravado no próprio comentário, que o portal escreve a partir do
+ * vínculo do servidor. É uma ponte transitória: todo negócio novo passa a ter
+ * registro de posse, e o uso desta via fica no log para poder ser removida
+ * quando o histórico tiver escoado.
+ */
+function comentarioTemNome(comments: unknown, nome: string): boolean {
+  const alvo = normalizeName(String(nome || ""));
+  if (!alvo) return false;
+  const linha = String(comments || "").match(/^NOME:\s*(.+)$/m);
+  return Boolean(linha && normalizeName(linha[1]) === alvo);
+}
+
+/** Bloco de identidade que o SERVIDOR carimba. O cliente não escolhe quem ele é. */
+function cabecalhoIdentidade(broker: Binding | undefined, uid: string): string {
+  if (!broker) return "";
+  return (
+    `IDENTIDADE CONFERIDA PELO SERVIDOR\n` +
+    `CORRETOR: ${broker.nome}\n` +
+    `CPF: ${maskCpf(broker.cpf)}\n` +
+    `CONTA: ${uid}\n` +
+    `==============================================\n\n`
+  );
+}
+
+function textoLimitado(valor: unknown, max: number): string {
+  return String(valor ?? "").slice(0, max);
+}
+
+async function buscarDealNoBitrix(id: string): Promise<any | null> {
+  const getUrl = urlBitrix("get");
+  if (!getUrl || isPlaceholderUrl(getUrl)) return null;
+  const resposta = await chamarBitrix(getUrl, { id });
+  if (!resposta.ok) return null;
+  const data = await resposta.json();
+  return data?.result || null;
+}
+
+/** Decide se um negócio pertence ao corretor: registro de posse, ou nome (legado). */
+async function dealEhDoCorretor(deal: any, uid: string, broker: Binding | undefined): Promise<boolean> {
+  const dealId = String(deal?.ID || "");
+  if (!dealId) return false;
+
+  const posse = await possesDosDeals([dealId]);
+  if (posse.has(dealId)) return posse.get(dealId) === uid;
+
+  if (broker && comentarioTemNome(deal?.COMMENTS, broker.nome)) {
+    console.log(`[Bitrix] posse legada aceita por nome deal=${dealId} uid=${uid}`);
+    return true;
+  }
+  return false;
+}
+
 app.post("/api/bitrix/list", async (req, res) => {
-  const listUrl = process.env.BITRIX_LIST_URL || process.env.VITE_BITRIX_LIST_URL;
+  const listUrl = urlBitrix("list");
   if (!listUrl) {
     return res.status(500).json({ error: "Configuração de integração Bitrix não encontrada (BITRIX_LIST_URL)." });
   }
 
   if (isPlaceholderUrl(listUrl)) {
-    return res.status(400).json({ 
+    return res.status(400).json({
       error: "Ambiente de Teste: Configure suas variáveis reais do Bitrix24 no servidor para habilitar esta integração."
     });
   }
 
+  // O PV pedido pelo cliente vale como RECORTE DE BUSCA, nunca como permissão:
+  // o que decide o que volta é a checagem de posse mais abaixo.
+  const pvBruto = (req.body?.filter || {})[BITRIX_PV_FIELD];
+  const pvIds = (Array.isArray(pvBruto) ? pvBruto : pvBruto ? [pvBruto] : [])
+    .map((v: unknown) => String(v ?? "").trim())
+    .filter((v: string) => v.length > 0 && v.length <= 64)
+    .slice(0, MAX_PV_POR_CONSULTA);
+
+  const filtro: Record<string, any> = { "=CATEGORY_ID": BITRIX_CATEGORY_ID };
+  if (pvIds.length > 0) filtro[BITRIX_PV_FIELD] = pvIds;
+
   try {
-    const response = await fetch(listUrl, {
-      method: "POST",
-      headers: { 
-        "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
-      },
-      body: JSON.stringify(req.body)
-    });
+    const response = await chamarBitrix(listUrl, { filter: filtro, select: CAMPOS_LISTA });
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -1239,47 +1434,53 @@ app.post("/api/bitrix/list", async (req, res) => {
     }
 
     const data = await response.json();
-    res.json(data);
+    const todos: any[] = Array.isArray(data?.result) ? data.result : [];
+
+    if (acessoIrrestrito(req)) return res.json({ ...data, result: todos });
+
+    const user = (req as any).user as DecodedIdToken | undefined;
+    const broker = (req as any).broker as Binding | undefined;
+    const uid = user?.uid || "";
+
+    // Uma consulta de posse para todo o lote, não uma por negócio.
+    const posses = await possesDosDeals(todos.map((d) => String(d?.ID || "")).filter(Boolean));
+    const meus = todos.filter((deal) => {
+      const dealId = String(deal?.ID || "");
+      if (posses.has(dealId)) return posses.get(dealId) === uid;
+      return Boolean(broker && comentarioTemNome(deal?.COMMENTS, broker.nome));
+    });
+
+    if (meus.length !== todos.length) {
+      console.warn(`[Bitrix] listagem escopada uid=${uid} devolvidos=${meus.length} de=${todos.length}`);
+    }
+
+    return res.json({ ...data, result: meus });
   } catch (error: any) {
     console.error("Proxy list error:", error);
-    res.status(500).json({ error: error.message || "Erro desconhecido no proxy de listagem." });
+    res.status(500).json({ error: "Erro no proxy de listagem do Bitrix." });
   }
 });
 
 app.post("/api/bitrix/get", async (req, res) => {
-  const writeUrl = process.env.BITRIX_WEBHOOK_WRITE_URL || process.env.VITE_BITRIX_WEBHOOK_WRITE_URL;
-  const listUrl = process.env.BITRIX_LIST_URL || process.env.VITE_BITRIX_LIST_URL;
-  
-  const baseUrl = writeUrl || listUrl;
-  if (!baseUrl) {
+  const getUrl = urlBitrix("get");
+  if (!getUrl) {
     return res.status(500).json({ error: "Configuração de integração Bitrix não encontrada." });
   }
 
-  if (isPlaceholderUrl(baseUrl)) {
-    return res.status(400).json({ 
+  if (isPlaceholderUrl(getUrl)) {
+    return res.status(400).json({
       error: "Ambiente de Teste: Configure suas variáveis reais do Bitrix24 no servidor para habilitar esta integração."
     });
   }
 
-  // Deduze a URL do crm.deal.get.json a partir do add ou do list
-  let getUrl = baseUrl;
-  if (writeUrl) {
-    getUrl = writeUrl.replace('crm.deal.add.json', 'crm.deal.get.json');
-  } else if (listUrl) {
-    getUrl = listUrl.replace('crm.deal.list.json', 'crm.deal.get.json');
+  // Id do Bitrix é numérico. Recusar aqui evita repassar lixo ao webhook.
+  const id = String(req.body?.id ?? "").trim();
+  if (!/^\d{1,20}$/.test(id)) {
+    return res.status(400).json({ error: "Identificador de negócio inválido." });
   }
 
   try {
-    const response = await fetch(getUrl, {
-      method: "POST",
-      headers: { 
-        "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
-      },
-      body: JSON.stringify(req.body)
-    });
+    const response = await chamarBitrix(getUrl, { id });
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -1287,36 +1488,66 @@ app.post("/api/bitrix/get", async (req, res) => {
     }
 
     const data = await response.json();
-    res.json(data);
+    const deal = data?.result || null;
+
+    if (!acessoIrrestrito(req)) {
+      const user = (req as any).user as DecodedIdToken | undefined;
+      const broker = (req as any).broker as Binding | undefined;
+      const uid = user?.uid || "";
+
+      if (!deal || !(await dealEhDoCorretor(deal, uid, broker))) {
+        // Mesma resposta para "não existe" e "não é seu": distinguir os dois
+        // transformaria o endpoint em um detector de negócios alheios.
+        console.warn(`[Bitrix] acesso negado a negócio uid=${uid} deal=${id}`);
+        return res.status(403).json({ error: "Negócio não encontrado ou sem acesso." });
+      }
+    }
+
+    return res.json({ ...data, result: deal });
   } catch (error: any) {
     console.error("Proxy get error:", error);
-    res.status(500).json({ error: error.message || "Erro desconhecido no proxy de busca individual." });
+    res.status(500).json({ error: "Erro no proxy de busca individual do Bitrix." });
   }
 });
 
 app.post("/api/bitrix/add", async (req, res) => {
-  const writeUrl = process.env.BITRIX_WEBHOOK_WRITE_URL || process.env.VITE_BITRIX_WEBHOOK_WRITE_URL;
-  if (!writeUrl) {
+  const addUrl = urlBitrix("add");
+  if (!addUrl) {
     return res.status(500).json({ error: "Configuração de integração Bitrix não encontrada (BITRIX_WEBHOOK_WRITE_URL)." });
   }
 
-  if (isPlaceholderUrl(writeUrl)) {
-    return res.status(400).json({ 
+  if (isPlaceholderUrl(addUrl)) {
+    return res.status(400).json({
       error: "Ambiente de Teste: Configure suas variáveis reais do Bitrix24 no servidor para habilitar esta integração."
     });
   }
 
+  const user = (req as any).user as DecodedIdToken | undefined;
+  const broker = (req as any).broker as Binding | undefined;
+  const camposCliente = req.body?.fields || {};
+
+  const pvId = textoLimitado(camposCliente[BITRIX_PV_FIELD], 64);
+  const valor = Number(camposCliente.OPPORTUNITY);
+
+  /**
+   * Os campos são remontados aqui em vez de repassados.
+   *
+   * A identificação do solicitante ia no COMMENTS montado pelo NAVEGADOR —
+   * quem controlasse o cliente registrava a solicitação com o nome e o CPF de
+   * outra pessoa. Agora o servidor carimba a identidade do vínculo no topo, e
+   * a categoria do funil deixa de ser escolha do cliente.
+   */
+  const fields: Record<string, any> = {
+    TITLE: textoLimitado(camposCliente.TITLE, 300),
+    CATEGORY_ID: BITRIX_CATEGORY_ID,
+    COMMENTS: cabecalhoIdentidade(broker, user?.uid || "-") + textoLimitado(camposCliente.COMMENTS, 20000),
+    [BITRIX_PV_FIELD]: pvId,
+    OPPORTUNITY: Number.isFinite(valor) && valor > 0 ? valor : 0,
+    CURRENCY_ID: "BRL",
+  };
+
   try {
-    const response = await fetch(writeUrl, {
-      method: "POST",
-      headers: { 
-        "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
-      },
-      body: JSON.stringify(req.body)
-    });
+    const response = await chamarBitrix(addUrl, { fields });
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -1324,37 +1555,91 @@ app.post("/api/bitrix/add", async (req, res) => {
     }
 
     const data = await response.json();
+    const dealId = String(data?.result || "");
+
+    // Registro de posse: é o que autoriza este corretor a ler e alterar o
+    // negócio depois. Falhar aqui não desfaz o negócio já criado no CRM, mas
+    // precisa aparecer no log — sem o registro, o acesso cairia no nome.
+    if (dealId && user?.uid) {
+      try {
+        await registrarPosseDeal(dealId, user.uid, broker?.cpf || "", pvId);
+      } catch (err: any) {
+        console.error(`[Bitrix] FALHA ao registrar posse deal=${dealId} uid=${user.uid}:`, err?.message || err);
+      }
+    }
+
     res.json(data);
   } catch (error: any) {
     console.error("Proxy add error:", error);
-    res.status(500).json({ error: error.message || "Erro desconhecido no proxy de adição." });
+    res.status(500).json({ error: "Erro no proxy de adição do Bitrix." });
   }
 });
 
 app.post("/api/bitrix/update", async (req, res) => {
-  const writeUrl = process.env.BITRIX_WEBHOOK_WRITE_URL || process.env.VITE_BITRIX_WEBHOOK_WRITE_URL;
-  if (!writeUrl) {
+  const updateUrl = urlBitrix("update");
+  if (!updateUrl) {
     return res.status(500).json({ error: "Configuração de integração Bitrix não encontrada (BITRIX_WEBHOOK_WRITE_URL)." });
   }
 
-  if (isPlaceholderUrl(writeUrl)) {
-    return res.status(400).json({ 
+  if (isPlaceholderUrl(updateUrl)) {
+    return res.status(400).json({
       error: "Ambiente de Teste: Configure suas variáveis reais do Bitrix24 no servidor para habilitar esta integração."
     });
   }
-  const updateUrl = writeUrl.replace('crm.deal.add.json', 'crm.deal.update.json');
+
+  const id = String(req.body?.id ?? "").trim();
+  if (!/^\d{1,20}$/.test(id)) {
+    return res.status(400).json({ error: "Identificador de negócio inválido." });
+  }
+
+  const camposCliente = req.body?.fields || {};
+  const fields: Record<string, any> = {};
+
+  /**
+   * Allowlist de campos. O portal só faz duas coisas com um negócio existente:
+   * anexar o contrato assinado e recusar a proposta. Repassar `fields` inteiro
+   * permitia reescrever valor, PV, título — e mover para "ganho", que é a
+   * auto-aprovação que o security_spec.md lista como ataque nº 6.
+   */
+  const anexo = camposCliente[BITRIX_FILE_FIELD];
+  if (anexo) {
+    const dados = Array.isArray(anexo?.fileData) ? anexo.fileData : null;
+    if (!dados || dados.length !== 2) {
+      return res.status(400).json({ error: "Anexo em formato inválido." });
+    }
+    fields[BITRIX_FILE_FIELD] = { fileData: [textoLimitado(dados[0], 260), String(dados[1] ?? "")] };
+  }
+
+  if (camposCliente.STAGE_ID !== undefined) {
+    const estagio = String(camposCliente.STAGE_ID);
+    if (!ESTAGIOS_PERMITIDOS.includes(estagio)) {
+      console.warn(`[Bitrix] estágio recusado deal=${id} estagio=${estagio}`);
+      return res.status(400).json({ error: "Mudança de etapa não permitida por este canal." });
+    }
+    fields.STAGE_ID = estagio;
+  }
+
+  if (Object.keys(fields).length === 0) {
+    return res.status(400).json({ error: "Nenhum campo alterável informado." });
+  }
 
   try {
-    const response = await fetch(updateUrl, {
-      method: "POST",
-      headers: { 
-        "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
-      },
-      body: JSON.stringify(req.body)
-    });
+    // Posse conferida ANTES de escrever. Diferente do /get, aqui não há
+    // caminho alternativo: alterar negócio alheio é o pior caso.
+    if (!acessoIrrestrito(req)) {
+      const user = (req as any).user as DecodedIdToken | undefined;
+      const broker = (req as any).broker as Binding | undefined;
+      const uid = user?.uid || "";
+      const deal = await buscarDealNoBitrix(id);
+
+      if (!deal || !(await dealEhDoCorretor(deal, uid, broker))) {
+        console.warn(`[Bitrix] alteração negada uid=${uid} deal=${id}`);
+        return res.status(403).json({ error: "Negócio não encontrado ou sem acesso." });
+      }
+    }
+
+    // Prazo maior: aqui trafega o contrato em base64.
+    const response = await chamarBitrix(updateUrl, { id, fields }, 25000);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -1365,7 +1650,7 @@ app.post("/api/bitrix/update", async (req, res) => {
     res.json(data);
   } catch (error: any) {
     console.error("Proxy update error:", error);
-    res.status(500).json({ error: error.message || "Erro desconhecido no proxy." });
+    res.status(500).json({ error: "Erro no proxy de atualização do Bitrix." });
   }
 });
 

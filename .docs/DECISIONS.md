@@ -237,10 +237,41 @@ cruzando com o cargo e superintendência do usuário (guia usuários).
 O sistema precisa criar deals no Bitrix24 quando uma antecipação é solicitada.
 
 **Decisão:**
-Usar os webhooks do domínio `hubnogueira.bitrix24.com.br`:
-- Criação: `/rest/382/tz0e5k2s7a44szbv/crm.deal.add.json`
-- Listagem: `/rest/382/seypu5ofz14p0ar1/crm.deal.list.json`
-- Escrita alternativa: `/rest/382/j5es5yzq4p9hnuf8/crm.deal.add.json`
+Usar os webhooks de entrada do Bitrix24, configurados por variável de ambiente
+e nunca escritos aqui:
+- Criação: `BITRIX_WEBHOOK_URL`
+- Listagem: `BITRIX_LIST_URL`
+- Escrita alternativa: `BITRIX_WEBHOOK_WRITE_URL`
+
+> A URL de um webhook do Bitrix **é** a credencial: quem tem a URL lê e escreve
+> no CRM sem mais nada. Por isso o valor mora só no `.env` do servidor (que não
+> é versionado) e nunca em documentação, que circula para fornecedores.
+
+### 🔴 INCIDENTE ABERTO — webhooks expostos e NÃO rotacionados
+
+Verificado em 2026-07-31, após a remoção das URLs deste arquivo:
+
+- As três URLs completas estiveram escritas aqui e em `.antigravity/*.pbtxt`,
+  e **continuam no histórico do git**. Tirá-las do arquivo não as tira do
+  histórico.
+- O repositório `Hub-On-Tecnologia/antecipa` é **PÚBLICO** no GitHub.
+- Os mesmos três tokens **continuam ativos** no `.env` do servidor de produção.
+
+Enquanto isso valer, qualquer pessoa na internet lê e escreve no CRM: lista
+todos os negócios do funil — cujos comentários carregam nome e CPF dos
+corretores —, cria negócios e altera etapa.
+
+**A rotação é a única correção.** Reescrever o histórico do git não resolve:
+o conteúdo já foi publicado e pode ter sido clonado ou indexado.
+
+Passos, no Bitrix24 (`Aplicações → Webhooks de entrada`):
+1. Revogar os três webhooks atuais do usuário 382.
+2. Criar três novos, com o menor escopo que atenda (`crm`).
+3. Atualizar `BITRIX_WEBHOOK_URL`, `BITRIX_LIST_URL` e
+   `BITRIX_WEBHOOK_WRITE_URL` no `.env` da VPS e reiniciar o processo.
+4. Só então marcar este incidente como fechado, com a data.
+
+Enquanto não for feito, **não** registrar aqui que foi.
 
 **Campos mapeados:**
 - `UF_CRM_1758140731010` → PV (ID da negociação)
